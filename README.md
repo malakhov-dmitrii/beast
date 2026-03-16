@@ -32,7 +32,7 @@ Then execution runs with strict TDD discipline: RED (failing test) → GREEN (mi
 ## Install
 
 ```bash
-claude plugin install https://github.com/malakhov-dmitrii/beast-plan.git
+claude plugin install https://github.com/malakhov-dmitrii/beast.git
 ```
 
 Verify:
@@ -49,7 +49,6 @@ claude plugin list
 | `/beast execute` | Load approved plan → TDD execution to completion |
 | `/beast status` | Show all sessions (active, pending, completed) |
 | `/cancel-beast` | Cancel active session(s) |
-| `/beast-plan "task"` | Planning only (v1 backward compat) |
 
 ## How It Works
 
@@ -123,10 +122,7 @@ beast/
 │   ├── beast.md               # Main router (/beast plan, /beast execute)
 │   ├── beast-execute.md       # Direct execute shortcut
 │   ├── beast-status.md        # Session status
-│   ├── cancel-beast.md        # Cancel sessions
-│   ├── beast-plan.md          # v1 backward compat (planning only)
-│   ├── beast-plan-status.md   # v1 status (backward compat)
-│   └── cancel-beast-plan.md   # v1 cancel (backward compat)
+│   └── cancel-beast.md        # Cancel sessions
 ├── hooks/
 │   ├── hooks.json             # Stop hook registration
 │   ├── stop-hook.sh           # State machine driving plan + execute loops
@@ -182,21 +178,11 @@ abc123      ✓ active   pipeline   plan     2/5   -
 def456      ✓ active   interview  plan     1/5   -
 ```
 
-## Upgrading from beast-plan v1
-
-Beast v2 is backward compatible:
-- `/beast-plan` still works (planning only)
-- `/beast-plan-status` and `/cancel-beast-plan` still work
-- Session directory `.beast-plan/` is preserved
-- Existing sessions are not affected
-
-New features require `/beast plan` and `/beast execute`.
-
 ## Troubleshooting
 
 ### "No such skill" error
 1. `claude plugin list` — verify beast is installed
-2. `claude plugin install https://github.com/malakhov-dmitrii/beast-plan.git` — reinstall
+2. `claude plugin install https://github.com/malakhov-dmitrii/beast.git` — reinstall
 3. Restart Claude Code
 4. Try `/beast plan "test"` again
 

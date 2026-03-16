@@ -122,11 +122,11 @@ fi
 # Test 11: All 7 commands exist
 echo -n "Testing: all 7 command files exist ... "
 CMD_COUNT=$(ls "$PLUGIN_ROOT/commands/"*.md 2>/dev/null | wc -l | tr -d ' ')
-if [[ "$CMD_COUNT" -eq 7 ]]; then
+if [[ "$CMD_COUNT" -eq 4 ]]; then
   echo -e "${GREEN}PASS${NC}"
   PASS=$((PASS + 1))
 else
-  echo -e "${RED}FAIL${NC} (found $CMD_COUNT, expected 7)"
+  echo -e "${RED}FAIL${NC} (found $CMD_COUNT, expected 4)"
   FAIL=$((FAIL + 1))
 fi
 

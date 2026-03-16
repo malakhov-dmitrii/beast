@@ -2,12 +2,25 @@
 description: "Check beast session status (shows all active, pending, and completed sessions)"
 ---
 
-Display beast session status. This works identically to `/beast-plan-status` — check both `.beast-plan/sessions/*/state.json` and `.beast-plan/pending-*/state.json`.
+Display beast session status.
 
-Follow the exact same protocol as the beast-plan-status command:
+1. **Find all sessions** — check these locations:
+   - `.beast-plan/sessions/*/state.json` (active/completed)
+   - `.beast-plan/pending-*/state.json` (unclaimed)
+   - `.beast-plan/state.json` (legacy flat structure)
 
-1. Find all sessions (pending, active, legacy)
-2. Extract session ID, status, phase, command (plan/execute), iteration, wave, task info
-3. Format as aligned table
-4. Show task descriptions for active sessions
-5. Show warnings for stale sessions (updated_at > 48 hours ago)
+2. **For each session, extract:**
+   - Session ID, status (active/completed/abandoned), phase
+   - Command (plan/execute), iteration count, wave/task progress
+   - Task description
+
+3. **Format as aligned table:**
+   ```
+   SESSION ID   STATUS    COMMAND  PHASE      ITER  WAVE
+   abc123      ✓ active   plan     pipeline   2/5   -
+   def456      ✓ active   execute  running    -     3/5
+   ghi789      ✗ done     plan     complete   3/5   -
+   ```
+
+4. **Show warnings** for stale sessions (updated_at > 48 hours ago)
+5. **Show task descriptions** for active sessions
