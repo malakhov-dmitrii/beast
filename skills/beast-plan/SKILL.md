@@ -166,9 +166,9 @@ The Stop hook will inject a prompt telling you to run research. Follow its instr
 1. Read `.beast-plan/CONTEXT.md`
 2. Spawn researcher:
    ```
-   Task(subagent_type="beast-plan:researcher", model="sonnet", prompt=<assembled context>)
+   Task(subagent_type="beast:researcher", model="sonnet", prompt=<assembled context>)
    ```
-   **Fallback:** If `beast-plan:researcher` is not available as a subagent type, read the agent file at the plugin's `agents/researcher.md` and inline its instructions as a prompt prefix.
+   **Fallback:** If `beast:researcher` is not available as a subagent type, read the agent file at the plugin's `agents/researcher.md` and inline its instructions as a prompt prefix.
 
    **Domain Detection:** The hook automatically discovers relevant skills based on the task description. If domain-specific skills are detected (e.g., marketing, frontend design), their content will be injected into the researcher prompt to provide specialized context.
 
@@ -190,7 +190,7 @@ The Stop hook drives this loop. For each actor transition, you:
 
 3. **Spawn agent:**
    ```
-   Task(subagent_type="beast-plan:{actor}", model="{model}", prompt=<assembled context>)
+   Task(subagent_type="beast:{actor}", model="{model}", prompt=<assembled context>)
    ```
    **Fallback:** If the subagent type is not available, read the agent file from the plugin's `agents/` directory and inline its content as a prompt prefix.
 
@@ -202,10 +202,10 @@ The Stop hook drives this loop. For each actor transition, you:
 
 | Actor | Subagent Type | Model | Reads | Writes |
 |-------|--------------|-------|-------|--------|
-| Planner | `beast-plan:planner` | opus | CONTEXT.md, RESEARCH.md, (prior feedback if revision) | `iterations/NN/PLAN.md` |
-| Skeptic | `beast-plan:skeptic` | opus | `iterations/NN/PLAN.md`, CONTEXT.md summary | `iterations/NN/SKEPTIC-REPORT.md` |
-| TDD Reviewer | `beast-plan:tdd-reviewer` | sonnet | `iterations/NN/PLAN.md`, `iterations/NN/SKEPTIC-REPORT.md` | `iterations/NN/TDD-REPORT.md` |
-| Critic | `beast-plan:critic` | opus | `iterations/NN/PLAN.md`, all reports, CONTEXT.md | `iterations/NN/CRITIC-REPORT.md` |
+| Planner | `beast:planner` | opus | CONTEXT.md, RESEARCH.md, (prior feedback if revision) | `iterations/NN/PLAN.md` |
+| Skeptic | `beast:skeptic` | opus | `iterations/NN/PLAN.md`, CONTEXT.md summary | `iterations/NN/SKEPTIC-REPORT.md` |
+| TDD Reviewer | `beast:tdd-reviewer` | sonnet | `iterations/NN/PLAN.md`, `iterations/NN/SKEPTIC-REPORT.md` | `iterations/NN/TDD-REPORT.md` |
+| Critic | `beast:critic` | opus | `iterations/NN/PLAN.md`, all reports, CONTEXT.md | `iterations/NN/CRITIC-REPORT.md` |
 
 ### After Critic
 

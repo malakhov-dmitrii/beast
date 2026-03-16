@@ -1,245 +1,216 @@
-# 🐻 Beast-Plan
+# Beast
 
-**Automated iterative planning for Claude Code that produces one-shot-ready implementation plans.**
-
-Give it a complex feature. Get back a bulletproof plan that a fresh Claude session can execute without asking a single question.
+**Plan-to-code pipeline for Claude Code.** Give it a complex feature. Get back a bulletproof plan verified by 5 specialized agents. Then execute it with TDD, parallel agents, and real-world verification.
 
 ```
-Interview → Research → [Planner → Skeptic → TDD Reviewer → Critic] ×N → Final Plan
-                        \_____________________________________________/
-                              Loops until consensus (max 5 iterations)
+/beast plan "Add user authentication with OAuth"
+
+  P1: Explorer → codebase summary
+  P2: Adaptive Discussion → resolve ambiguities
+  P3: Researcher → deep investigation
+  P4: [Planner → Skeptic + TDD Review → Critic] ×N → consensus plan
+       ↓
+  FINAL-PLAN.md (approval gate — you review before executing)
+
+/beast execute
+
+  E0: Load plan → E1: Prerequisites check
+  E2: Parse tasks → E3: TDD execution (parallel per wave)
+  E4: Integration tests → E5: Real-world verification
+  E5.5: Auto-fix loop → E6: Architect review
+  E6.5: Code simplify → E7: Demo → Done
 ```
-
-## How it works
-
-You describe what you want to build. Beast-plan runs it through 5 specialized roles:
-
-| Role | Model | Job |
-|------|-------|-----|
-| **Researcher** | Sonnet | Deep-dives your codebase, runs scripts, tests API calls, checks docs on the web — tags every finding with confidence level |
-| **Planner** | Opus | Writes a step-by-step plan with TDD baked in. Every step is small enough to execute without ambiguity |
-| **Skeptic** | Opus | Hunts "mirages" — assumptions disguised as facts. Phantom APIs, version mismatches, missing error handling. **Actually verifies** by reading code and running commands |
-| **TDD Reviewer** | Sonnet | Ensures tests are genuinely test-first, not afterthoughts bolted on |
-| **Critic** | Opus | Scores the plan out of 25. Below 20 → back to Planner with feedback. 20+ → approved |
-
-The loop runs until the Critic approves or 5 iterations are reached. Typical run: 2-3 iterations, 15-50 minutes depending on complexity.
 
 ## Why
 
-Because plans have blind spots. You write steps 1-4 beautifully, then step 5 is "integrate with auth middleware" with zero details. In practice, that's where everything breaks — and often those details change the entire plan.
+Plans have blind spots. You write steps 1-4 perfectly, then step 5 says "integrate with auth middleware" with zero details. That's where everything breaks.
 
-Beast-plan's Skeptic catches every "we'll figure it out later" and forces the Planner to be honest. The result: no surprises during implementation.
+Beast's Skeptic catches every "we'll figure it out later" and forces the Planner to be honest. The Critic scores the plan out of 25 — below 20 means back to the drawing board. Only when the plan is bulletproof does execution begin.
 
-## The Skeptic hunts 10 mirage patterns
-
-1. **Phantom APIs** — references endpoints that don't exist or work differently
-2. **Version mismatches** — assumes features from wrong library version
-3. **Missing error paths** — happy path only, no edge cases
-4. **Wrong assumptions** — "this returns an array" when it returns null
-5. **Dependency conflicts** — incompatible package versions
-6. **Race conditions** — concurrent access not handled
-7. **Config gaps** — env vars, secrets, permissions not specified
-8. **Schema drift** — plan assumes DB schema that doesn't match reality
-9. **Auth blindness** — ignores permissions, tokens, session handling
-10. **Test theater** — tests that pass but don't actually verify behavior
+Then execution runs with strict TDD discipline: RED (failing test) → GREEN (minimal code) → REFACTOR. Parallel agents handle independent tasks. A bounded QA fixer auto-repairs common failures. An architect reviews everything before you see it.
 
 ## Install
-
-### Method 1: Direct Install (Recommended)
 
 ```bash
 claude plugin install https://github.com/malakhov-dmitrii/beast-plan.git
 ```
 
-### Method 2: Via Marketplace
-
-```bash
-# Add marketplace
-mkdir -p ~/.claude/plugins/marketplaces/malakhov
-cd ~/.claude/plugins/marketplaces/malakhov
-git clone https://github.com/malakhov-dmitrii/beast-plan.git
-
-# Create manifest
-mkdir -p .claude-plugin
-cat > .claude-plugin/marketplace.json << 'EOF'
-{
-  "name": "malakhov-marketplace",
-  "plugins": {
-    "beast-plan": {
-      "versions": {
-        "1.0.0": {"source": "beast-plan"}
-      }
-    }
-  }
-}
-EOF
-
-# Install
-claude plugin install beast-plan@malakhov-marketplace
-```
-
-### Verify Installation
-
+Verify:
 ```bash
 claude plugin list
-# Should show: beast-plan
+# Should show: beast
 ```
-
-Then use `/beast-plan` command in Claude Code.
-
-**⚠️ Note:** Simply cloning to `~/.claude/plugins` won't work - use the installation methods above.
 
 ## Commands
 
-- `/beast-plan "task description"` — Start a new planning session
-- `/beast-plan-status` — Check all session progress (shows pending, active, legacy)
-- `/cancel-beast-plan` — Cancel active session(s) with optional cleanup
+| Command | What it does |
+|---------|-------------|
+| `/beast plan "task"` | Full planning pipeline → stops at approval gate |
+| `/beast execute` | Load approved plan → TDD execution to completion |
+| `/beast status` | Show all sessions (active, pending, completed) |
+| `/cancel-beast` | Cancel active session(s) |
+| `/beast-plan "task"` | Planning only (v1 backward compat) |
 
-## 🔥 Multi-Session Support (New!)
+## How It Works
 
-Run multiple beast-plan sessions concurrently in the same project without interference!
+### Planning Phase (`/beast plan`)
 
-### How It Works
+1. **Explorer** maps the codebase — structure, tech stack, test infrastructure, patterns
+2. **Adaptive Discussion** interviews you about ambiguities — but only genuine ones. If the answer is in the codebase, it decides autonomously. Questions come with options, analysis, and recommendations
+3. **Researcher** deep-dives dependencies, APIs, schemas, existing patterns
+4. **Planner** creates a wave-ordered, TDD-first implementation plan with concrete test cases
+5. **Skeptic + TDD Reviewer** run in parallel — one hunts mirages (claims that sound right but are wrong), the other checks TDD compliance
+6. **Critic** scores /25 — APPROVED (20+), REVISE (15-19), or REJECT (<15). Loop continues until consensus
 
-Each Claude Code window gets its own isolated session:
-- **Pending**: New sessions create `.beast-plan/pending-{timestamp}/`
-- **Auto-Claiming**: Hook claims pending session using transcript path
-- **Isolated**: Each session gets `.beast-plan/sessions/{session-id}/`
-- **No Conflicts**: Sessions don't interfere with each other
+Result: `FINAL-PLAN.md` that a fresh Claude session can execute without asking a single question.
 
-### Example: Concurrent Sessions
+### Execution Phase (`/beast execute`)
 
-**Terminal 1:**
-```
-/beast-plan "Implement authentication"
-```
+1. **Prerequisites Check** — verifies all API keys, dependencies, infrastructure before coding
+2. **TDD Execution** — RED→GREEN→REFACTOR for every task, parallel agents per wave
+3. **Wave Integration Tests** — cross-component verification after each wave
+4. **Real-World Verification** — browser testing, API calls, bot interactions (not just unit tests)
+5. **Auto-Fix Loop** — bounded diagnosis→fix cycles for common failures (max 5)
+6. **Architect Review** — final code review against plan and quality standards
+7. **Code Simplify** — automatic cleanup of modified files (preserves all functionality)
 
-**Terminal 2 (same project):**
-```
-/beast-plan "Add payment processing"
-```
+## 10 Specialized Agents
 
-Both run independently! Check status:
-```
-/beast-plan-status
+| Agent | Model | Role |
+|-------|-------|------|
+| Explorer | Sonnet | Quick codebase mapping |
+| Researcher | Sonnet | Deep investigation with confidence tagging |
+| Planner | Opus | TDD-embedded plan creation |
+| Skeptic | Opus | Mirage detection — verifies claims against reality |
+| TDD Reviewer | Sonnet | Test-first compliance checking |
+| Critic | Opus | Final quality gate, scores /25 |
+| Executor | Sonnet | TDD implementation (RED→GREEN→REFACTOR) |
+| QA Fixer | Sonnet | Bounded test-fix loop (max 5 cycles) |
+| Architect | Opus | Code review + content quality check |
+| Simplifier | Opus | Post-approval code cleanup |
 
-SESSION ID   STATUS    PHASE      ITER  STARTED              UPDATED
-abc123      ✓ active   pipeline   2/5   2026-02-16 10:30    2026-02-16 11:45
-def456      ✓ active   research   1/5   2026-02-16 11:00    2026-02-16 11:15
-```
+## The Skeptic Hunts 10 Mirage Patterns
 
-**Backward Compatible:** Legacy flat-structure sessions (`.beast-plan/state.json`) still work unchanged.
+1. **Phantom APIs** — references endpoints that don't exist
+2. **Version mismatches** — assumes features from wrong library version
+3. **Missing error paths** — happy path only
+4. **Wrong assumptions** — "this returns an array" when it returns null
+5. **Dependency conflicts** — incompatible packages
+6. **Race conditions** — concurrent access not handled
+7. **Config gaps** — env vars, secrets, permissions not specified
+8. **Schema drift** — plan assumes schema that doesn't match reality
+9. **Auth blindness** — ignores permissions, tokens, sessions
+10. **Test theater** — tests that pass but don't verify behavior
 
 ## Structure
 
 ```
-beast-plan/
+beast/
+├── .claude-plugin/
+│   └── plugin.json           # Plugin metadata (name: "beast", version: "2.0.0")
 ├── agents/
-│   ├── researcher.md    # Deep research with confidence tagging
-│   ├── planner.md       # TDD-embedded plan creation
-│   ├── skeptic.md       # Mirage detection specialist
-│   ├── tdd-reviewer.md  # Test-first compliance checker
-│   └── critic.md        # Final quality gate (scores /25)
+│   ├── researcher.md          # Deep research with confidence tagging
+│   ├── planner.md             # TDD-embedded plan creation
+│   ├── skeptic.md             # Mirage detection specialist
+│   ├── tdd-reviewer.md        # Test-first compliance checker
+│   ├── critic.md              # Final quality gate (scores /25)
+│   ├── explorer.md            # Quick codebase mapping
+│   ├── executor.md            # TDD implementation agent
+│   ├── architect.md           # Code review (read-only)
+│   ├── simplifier.md          # Code cleanup specialist
+│   └── qa-fixer.md            # Bounded test-fix loop
 ├── commands/
-│   ├── beast-plan.md
-│   ├── beast-plan-status.md
-│   └── cancel-beast-plan.md
+│   ├── beast.md               # Main router (/beast plan, /beast execute)
+│   ├── beast-execute.md       # Direct execute shortcut
+│   ├── beast-status.md        # Session status
+│   ├── cancel-beast.md        # Cancel sessions
+│   ├── beast-plan.md          # v1 backward compat (planning only)
+│   ├── beast-plan-status.md   # v1 status (backward compat)
+│   └── cancel-beast-plan.md   # v1 cancel (backward compat)
 ├── hooks/
-│   ├── hooks.json
-│   ├── stop-hook.sh     # Drives the iteration loop
-│   └── discover-skills.sh
+│   ├── hooks.json             # Stop hook registration
+│   ├── stop-hook.sh           # State machine driving plan + execute loops
+│   └── discover-skills.sh     # Domain skill discovery
 ├── skills/
+│   ├── beast/
+│   │   └── SKILL.md           # Full plan+execute orchestration protocol
 │   └── beast-plan/
-│       └── SKILL.md     # Full orchestration protocol
+│       └── SKILL.md           # v1 planning-only protocol (backward compat)
 └── tests/
+    ├── test-stop-hook-execute.sh    # Execute phase hook tests
+    ├── test-stop-hook-integration.sh # Planning phase hook tests
+    └── test-discover-skills.sh       # Skill discovery tests
 ```
+
+## Session Storage
+
+Sessions live in `.beast-plan/` within your project:
+
+```
+.beast-plan/
+├── pending-{timestamp}/      # Unclaimed session (pre-hook)
+└── sessions/{session-id}/    # Active/completed session
+    ├── state.json            # Full state tracking
+    ├── CONTEXT.md            # Requirements + decisions
+    ├── RESEARCH.md           # Research findings
+    ├── FINAL-PLAN.md         # Approved plan (approval gate)
+    ├── tasks.json            # Execution task tracker
+    ├── wave-N-summary.md     # Per-wave execution summary
+    ├── iterations/
+    │   └── NN/
+    │       ├── PLAN.md
+    │       ├── SKEPTIC-REPORT.md
+    │       ├── TDD-REPORT.md
+    │       └── CRITIC-VERDICT.md
+    └── logs/
+        └── events.jsonl
+```
+
+Add `.beast-plan/` to `.gitignore`.
+
+## Multi-Session Support
+
+Run multiple sessions concurrently in the same project:
+
+```
+/beast plan "Add authentication"    # Terminal 1
+/beast plan "Add payment processing" # Terminal 2
+
+/beast status
+SESSION ID   STATUS    PHASE      COMMAND  ITER  WAVE
+abc123      ✓ active   pipeline   plan     2/5   -
+def456      ✓ active   interview  plan     1/5   -
+```
+
+## Upgrading from beast-plan v1
+
+Beast v2 is backward compatible:
+- `/beast-plan` still works (planning only)
+- `/beast-plan-status` and `/cancel-beast-plan` still work
+- Session directory `.beast-plan/` is preserved
+- Existing sessions are not affected
+
+New features require `/beast plan` and `/beast execute`.
 
 ## Troubleshooting
 
 ### "No such skill" error
+1. `claude plugin list` — verify beast is installed
+2. `claude plugin install https://github.com/malakhov-dmitrii/beast-plan.git` — reinstall
+3. Restart Claude Code
+4. Try `/beast plan "test"` again
 
-**Problem:** Installed plugin but `/beast-plan` not recognized.
-
-**Solution:**
-1. Verify: `claude plugin list` (should show beast-plan)
-2. If not listed, reinstall: `claude plugin install https://github.com/malakhov-dmitrii/beast-plan.git`
-3. Restart Claude Code completely
-4. Try `/beast-plan "test"` again
-
-### Stale pending sessions
-
-**Problem:** Crashed sessions leave `pending-*` directories.
-
-**Solution:**
-```bash
-/beast-plan-status          # Shows stale sessions
-/cancel-beast-plan          # Clean them up
+### Stale sessions
+```
+/beast status        # Shows stale sessions
+/cancel-beast        # Clean them up
 ```
 
 ### Hook not executing
-
-**Problem:** Session stays in `pending-*` forever.
-
-**Check:**
 ```bash
-# Verify hook exists
-ls ~/.claude/plugins/cache/*/beast-plan/*/hooks/stop-hook.sh
-
-# Make executable
-chmod +x ~/.claude/plugins/cache/*/beast-plan/*/hooks/stop-hook.sh
+ls ~/.claude/plugins/cache/*/beast/*/hooks/stop-hook.sh
+chmod +x ~/.claude/plugins/cache/*/beast/*/hooks/stop-hook.sh
 ```
-
----
-
-## 🇷🇺 Русская инструкция
-
-### Установка
-
-**Быстрая установка:**
-```bash
-claude plugin install https://github.com/malakhov-dmitrii/beast-plan.git
-```
-
-**Проверка:**
-```bash
-claude plugin list
-# Должен быть: beast-plan
-```
-
-### Использование
-
-```
-/beast-plan "Реализовать аутентификацию"
-```
-
-**Статус:**
-```
-/beast-plan-status
-```
-
-### Что это?
-
-Beast-plan создает качественные планы через проверку 5 специализированными агентами:
-1. **Researcher** — исследует код и документацию
-2. **Planner** — создает детальный план
-3. **Skeptic** — ловит ошибки и нереальные предположения
-4. **TDD Reviewer** — проверяет тесты
-5. **Critic** — оценивает качество (≥20/25 для одобрения)
-
-### Несколько сессий одновременно
-
-Можно запускать несколько сессий в одном проекте — они не мешают друг другу!
-
-### Проблема: "No such skill"
-
-**Решение:**
-1. `claude plugin list` — проверьте установку
-2. `claude plugin install https://github.com/malakhov-dmitrii/beast-plan.git` — переустановите
-3. Перезапустите Claude Code
-
-⚠️ **Важно:** Просто `git clone` в `~/.claude/plugins` не работает! Используйте `claude plugin install`.
-
----
 
 ## License
 

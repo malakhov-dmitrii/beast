@@ -1,8 +1,9 @@
 {
-  "name": "beast-plan",
-  "version": "1.0.0",
-  "description": "Automated iterative planning with 5-actor verification pipeline: Researcher, Planner, Skeptic, TDD Reviewer, Critic",
+  "name": "beast",
+  "version": "2.0.0",
+  "description": "Plan-to-code pipeline: automated planning with 5-actor verification, then TDD execution with parallel agents. Formerly beast-plan.",
   "author": {
     "name": "Dmitrii Malakhov"
-  }
+  },
+  "skills": "./skills/"
 }

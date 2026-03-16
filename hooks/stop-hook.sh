@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# Resolve hook directory for discover-skills.sh
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Read hook input ONCE at the start
 HOOK_INPUT=$(cat)
 
@@ -135,6 +138,9 @@ ITERATION=$(jq -r '.iteration // 1' "$STATE_FILE")
 MAX_ITER=$(jq -r '.max_iterations // 5' "$STATE_FILE")
 VERDICT=$(jq -r '.critic_verdict // ""' "$STATE_FILE")
 FLAGS=$(jq -r '.flags // [] | join(",")' "$STATE_FILE")
+COMMAND=$(jq -r '.command // "plan"' "$STATE_FILE")
+EXEC_WAVE=$(jq -r '.execution_wave // 0' "$STATE_FILE")
+EXEC_TASK=$(jq -r '.execution_task // 0' "$STATE_FILE")
 
 LAST_OUTPUT=""
 if [[ -n "$TRANSCRIPT_PATH" && -f "$TRANSCRIPT_PATH" ]]; then
@@ -214,7 +220,7 @@ BEAST-PLAN: Interview complete. Now run the RESEARCH phase.
 1. Read \`${BASE_DIR}/CONTEXT.md\` to understand the requirements and decisions.
 2. Spawn the researcher agent:
    \`\`\`
-   Task(subagent_type="beast-plan:researcher", model="sonnet", prompt=<CONTEXT.md content + research instructions>)
+   Task(subagent_type="beast:researcher", model="sonnet", prompt=<CONTEXT.md content + research instructions>)
    \`\`\`
    Pass the full CONTEXT.md content in the prompt. Tell the researcher to investigate everything needed for a bulletproof implementation plan.${SKILL_CONTENT}
 3. Write the researcher's output to \`${BASE_DIR}/RESEARCH.md\`
@@ -230,7 +236,7 @@ BEAST-PLAN: Research complete. Now run the PLANNING phase (iteration starts).
 1. Read `${BASE_DIR}/CONTEXT.md` and `${BASE_DIR}/RESEARCH.md`
 2. Spawn the planner agent:
    ```
-   Task(subagent_type="beast-plan:planner", model="opus", prompt=<CONTEXT.md + RESEARCH.md content>)
+   Task(subagent_type="beast:planner", model="opus", prompt=<CONTEXT.md + RESEARCH.md content>)
    ```
    Pass both files' content in the prompt. The planner creates a detailed, TDD-embedded, one-shot-executable implementation plan.
 3. Create directory `${BASE_DIR}/iterations/01/` (use current iteration number, zero-padded)
@@ -243,17 +249,27 @@ HEREDOC
     "pipeline:planner")
       ITER_DIR=$(printf "%02d" "$ITERATION")
       read -r -d '' PROMPT << HEREDOC || true
-BEAST-PLAN: Plan created. Now run the SKEPTIC review.
+BEAST-PLAN: Plan created. Now run PARALLEL REVIEW (Skeptic + TDD simultaneously).
 
 1. Read \`${BASE_DIR}/iterations/${ITER_DIR}/PLAN.md\`
-2. Spawn the skeptic agent:
+2. Spawn BOTH agents simultaneously (in parallel):
+
+   Agent 1 - Skeptic:
    \`\`\`
-   Task(subagent_type="beast-plan:skeptic", model="opus", prompt=<PLAN.md content + CONTEXT.md summary>)
+   Task(subagent_type="beast:skeptic", model="opus", prompt=<PLAN.md content + CONTEXT.md summary>)
    \`\`\`
-   Pass the full plan and a brief summary of requirements. The skeptic verifies all claims against codebase reality and external facts.
-3. Write the skeptic's output to \`${BASE_DIR}/iterations/${ITER_DIR}/SKEPTIC-REPORT.md\`
-4. Update \`${BASE_DIR}/state.json\`: set \`pipeline_actor\` to \`"skeptic"\`
-5. Emit \`<bp-phase-done>\`
+
+   Agent 2 - TDD Reviewer:
+   \`\`\`
+   Task(subagent_type="beast:tdd-reviewer", model="sonnet", prompt=<PLAN.md content>)
+   \`\`\`
+
+3. Wait for BOTH to complete.
+4. Write outputs:
+   - Skeptic output to \`${BASE_DIR}/iterations/${ITER_DIR}/SKEPTIC-REPORT.md\`
+   - TDD Reviewer output to \`${BASE_DIR}/iterations/${ITER_DIR}/TDD-REPORT.md\`
+5. Update \`${BASE_DIR}/state.json\`: set \`pipeline_actor\` to \`"tdd-reviewer"\`
+6. Emit \`<bp-phase-done>\`
 HEREDOC
       ;;
 
@@ -265,7 +281,7 @@ BEAST-PLAN: Skeptic review complete. Now run the TDD REVIEW.
 1. Read \`${BASE_DIR}/iterations/${ITER_DIR}/PLAN.md\` and \`${BASE_DIR}/iterations/${ITER_DIR}/SKEPTIC-REPORT.md\`
 2. Spawn the TDD reviewer agent:
    \`\`\`
-   Task(subagent_type="beast-plan:tdd-reviewer", model="sonnet", prompt=<PLAN.md content + SKEPTIC-REPORT.md content>)
+   Task(subagent_type="beast:tdd-reviewer", model="sonnet", prompt=<PLAN.md content + SKEPTIC-REPORT.md content>)
    \`\`\`
    Pass the plan and skeptic report. The TDD reviewer checks test-first compliance and test quality.
 3. Write the TDD reviewer's output to \`${BASE_DIR}/iterations/${ITER_DIR}/TDD-REPORT.md\`
@@ -286,7 +302,7 @@ BEAST-PLAN: TDD review complete. Now run the CRITIC evaluation.
    - \`${BASE_DIR}/CONTEXT.md\` (requirements summary)
 2. Spawn the critic agent:
    \`\`\`
-   Task(subagent_type="beast-plan:critic", model="opus", prompt=<all file contents assembled>)
+   Task(subagent_type="beast:critic", model="opus", prompt=<all file contents assembled>)
    \`\`\`
    Pass ALL files' content. The critic scores the plan, aggregates feedback, and issues a verdict.
 3. Write the critic's output to \`${BASE_DIR}/iterations/${ITER_DIR}/CRITIC-REPORT.md\`
@@ -336,7 +352,7 @@ The Critic flagged NEEDS_RE_RESEARCH. Run targeted research first.
 1. Read the Critic report at \`${BASE_DIR}/iterations/${OLD_ITER_DIR}/CRITIC-REPORT.md\` to identify what needs re-research.
 2. Spawn the researcher agent with targeted scope:
    \`\`\`
-   Task(subagent_type="beast-plan:researcher", model="sonnet", prompt=<targeted research questions from critic report>)
+   Task(subagent_type="beast:researcher", model="sonnet", prompt=<targeted research questions from critic report>)
    \`\`\`
 3. Append the new findings to \`${BASE_DIR}/RESEARCH.md\` under a "## Supplemental Research (Iteration ${NEW_ITER})" heading.
 4. Then read ALL feedback:
@@ -347,7 +363,7 @@ The Critic flagged NEEDS_RE_RESEARCH. Run targeted research first.
    - \`${BASE_DIR}/CONTEXT.md\`
 5. Spawn the planner agent:
    \`\`\`
-   Task(subagent_type="beast-plan:planner", model="opus", prompt=<all feedback + research + context>)
+   Task(subagent_type="beast:planner", model="opus", prompt=<all feedback + research + context>)
    \`\`\`
    Tell the planner: "Address EVERY issue from prior reports. Include a Revision Notes section."
 6. Create directory \`${BASE_DIR}/iterations/${NEW_ITER_DIR}/\`
@@ -368,7 +384,7 @@ BEAST-PLAN: Plan needs REVISION (iteration ${NEW_ITER} of ${MAX_ITER}).
    - \`${BASE_DIR}/RESEARCH.md\`
 2. Spawn the planner agent:
    \`\`\`
-   Task(subagent_type="beast-plan:planner", model="opus", prompt=<all feedback + context + research>)
+   Task(subagent_type="beast:planner", model="opus", prompt=<all feedback + context + research>)
    \`\`\`
    Tell the planner: "This is iteration ${NEW_ITER}. Address EVERY issue from the Skeptic, TDD, and Critic reports. Include a Revision Notes section at the top listing each issue and how it was addressed. Do not silently ignore feedback."
 3. Create directory \`${BASE_DIR}/iterations/${NEW_ITER_DIR}/\`
@@ -410,7 +426,7 @@ Fundamental issues require re-research.
 1. Read the Critic report at \`${BASE_DIR}/iterations/${OLD_ITER_DIR}/CRITIC-REPORT.md\`
 2. Spawn the researcher agent with targeted scope based on the rejection reasons:
    \`\`\`
-   Task(subagent_type="beast-plan:researcher", model="sonnet", prompt=<rejection reasons + targeted research questions>)
+   Task(subagent_type="beast:researcher", model="sonnet", prompt=<rejection reasons + targeted research questions>)
    \`\`\`
 3. Append findings to \`${BASE_DIR}/RESEARCH.md\` under "## Re-Research (Iteration ${NEW_ITER})"
 4. Read ALL prior feedback and updated research
@@ -437,6 +453,70 @@ HEREDOC
 BEAST-PLAN: Finalization complete. The plan has been delivered to the human.
 
 Emit <bp-complete> to end the session.
+HEREDOC
+      ;;
+
+    # === EXECUTE PHASE CASES ===
+
+    "execute:prerequisites")
+      read -r -d '' PROMPT << HEREDOC || true
+BEAST: Prerequisites checked. Now parse the plan into tasks.
+
+1. Read \`${BASE_DIR}/FINAL-PLAN.md\`
+2. Extract all waves and tasks into \`${BASE_DIR}/tasks.json\`
+3. Update \`${BASE_DIR}/state.json\`: set \`phase\` to \`"execute"\`, \`pipeline_actor\` to \`"running"\`
+4. Begin executing Wave 1 tasks with TDD (follow the beast skill instructions)
+5. Emit \`<bp-phase-done>\` after the current wave completes
+HEREDOC
+      ;;
+
+    "execute:running")
+      read -r -d '' PROMPT << HEREDOC || true
+BEAST: Wave ${EXEC_WAVE} complete. Continue execution.
+
+1. Check \`${BASE_DIR}/tasks.json\` for remaining waves
+2. If more waves remain:
+   - Run integration tests for the completed wave if applicable
+   - Write \`${BASE_DIR}/wave-${EXEC_WAVE}-summary.md\` with tests added, files changed, issues encountered
+   - Begin next wave's tasks with TDD
+   - Update \`${BASE_DIR}/state.json\`: increment \`execution_wave\`
+   - Emit \`<bp-phase-done>\` after the wave completes
+3. If all waves done:
+   - Update \`${BASE_DIR}/state.json\`: set \`pipeline_actor\` to \`"verify"\`
+   - Emit \`<bp-phase-done>\`
+HEREDOC
+      ;;
+
+    "execute:verify")
+      read -r -d '' PROMPT << HEREDOC || true
+BEAST: All waves executed. Run verification.
+
+1. Run the full test suite -- all tests must pass
+2. Execute each real-world verification step from FINAL-PLAN.md's Verification Strategy
+3. Record results in \`${BASE_DIR}/verification-results.md\`
+4. Update \`${BASE_DIR}/state.json\`: set \`pipeline_actor\` to \`"architect"\`
+5. Emit \`<bp-phase-done>\`
+HEREDOC
+      ;;
+
+    "execute:architect")
+      read -r -d '' PROMPT << HEREDOC || true
+BEAST: Verification complete. Run architect review.
+
+1. Spawn the architect agent:
+   \`\`\`
+   Task(subagent_type="beast:architect", model="opus", prompt=<git diff + test results + verification results + FINAL-PLAN.md acceptance criteria>)
+   \`\`\`
+2. Write output to \`${BASE_DIR}/ARCHITECT-REVIEW.md\`
+3. If APPROVED:
+   - Update \`${BASE_DIR}/state.json\`: set \`pipeline_actor\` to \`""\`, \`phase\` to \`"complete"\`
+   - Present completion summary to user
+   - Emit \`<bp-complete>\`
+4. If ISSUES found:
+   - Fix the specific issues
+   - Re-run tests
+   - Re-verify
+   - Emit \`<bp-phase-done>\` to re-trigger architect review
 HEREDOC
       ;;
 
@@ -479,6 +559,18 @@ case "$PHASE:$ACTOR" in
         ;;
       "finalize:")
         PROMPT="BEAST-PLAN: Finalization in progress. Complete the finalization steps and emit <bp-phase-done>."
+        ;;
+      "execute:prerequisites")
+        PROMPT="BEAST: You are checking prerequisites. Verify all prerequisites from FINAL-PLAN.md, then update state.json and emit <bp-phase-done>."
+        ;;
+      "execute:running")
+        PROMPT="BEAST: You are executing wave ${EXEC_WAVE}. Continue implementing tasks with TDD. When the wave is complete, update state.json and emit <bp-phase-done>."
+        ;;
+      "execute:verify")
+        PROMPT="BEAST: You are in the verification phase. Run all verification steps from FINAL-PLAN.md, then update state.json and emit <bp-phase-done>."
+        ;;
+      "execute:architect")
+        PROMPT="BEAST: You are in the architect review phase. Spawn the architect agent, then update state.json and emit <bp-phase-done>."
         ;;
       *)
         PROMPT="BEAST-PLAN: Session is active but state is unclear. Read .beast-plan/state.json and continue the current phase. Emit <bp-phase-done> when the current phase is complete."

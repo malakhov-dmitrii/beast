@@ -2,6 +2,8 @@
 description: Start automated iterative planning with 5-actor verification pipeline (Researcher → Planner → Skeptic → TDD Reviewer → Critic)
 ---
 
+> **Note:** This is the original planning-only command. For the full plan+execute pipeline, use `/beast plan` and `/beast execute`.
+
 Before starting, check for existing active sessions:
 
 1. **Scan for sessions:**
@@ -17,7 +19,7 @@ Before starting, check for existing active sessions:
 
 3. **Invoke the skill:**
    ```
-   Invoke the `beast-plan:beast-plan` skill and follow it exactly.
+   Invoke the `beast:beast-plan` skill and follow it exactly.
 
    Target task: $ARGUMENTS
    ```
