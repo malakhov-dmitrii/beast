@@ -1,15 +1,4 @@
 {
-  "description": "Beast-plan plugin stop hook for iterative planning pipeline",
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/stop-hook.mjs"
-          }
-        ]
-      }
-    ]
-  }
+  "description": "Beast-forge plugin hooks. Stop hook removed in v3 — ralph provides persistence instead.",
+  "hooks": {}
 }

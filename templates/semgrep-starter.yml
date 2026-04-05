@@ -1,0 +1,87 @@
+rules:
+  # -------------------------------------------------------------------------
+  # HOW TO USE THIS FILE
+  # -------------------------------------------------------------------------
+  # 1. Copy this file to your project: cp templates/semgrep-starter.yml .semgrep/rules.yml
+  # 2. Uncomment rules that apply to your stack.
+  # 3. Add project-specific rules below the examples.
+  # 4. Run: semgrep --config .semgrep/rules.yml .
+  #
+  # Rules are commented out by default — enable only what's relevant.
+  # -------------------------------------------------------------------------
+
+  # -------------------------------------------------------------------------
+  # RULE: page.evaluate closure in esbuild-bundled code
+  #
+  # WHY: esbuild bundles closures, breaking references to outer-scope variables
+  # inside page.evaluate(). The closure runs in the browser context where those
+  # variables don't exist. Only string expressions or self-contained functions
+  # are safe.
+  #
+  # PATTERN: page.evaluate(fn) where fn references an outer-scope identifier.
+  # -------------------------------------------------------------------------
+  # - id: no-page-evaluate-closure
+  #   patterns:
+  #     - pattern: $PAGE.evaluate(($...ARGS) => { ... $VAR ... })
+  #     - pattern-not: $PAGE.evaluate(($...ARGS) => { ... })
+  #   message: |
+  #     page.evaluate() closures that reference outer-scope variables break in
+  #     esbuild-bundled code (Trigger.dev, etc.). Use a string expression:
+  #       page.evaluate(`document.querySelector('${selector}').click()`)
+  #     or pass variables as arguments:
+  #       page.evaluate((sel) => document.querySelector(sel).click(), selector)
+  #   languages: [typescript, javascript]
+  #   severity: ERROR
+  #   paths:
+  #     include:
+  #       - "src/trigger/**"
+  #       - "lib/stagehand/**"
+
+  # -------------------------------------------------------------------------
+  # RULE: localhost in anti-detect browser configs
+  #
+  # WHY: Anti-detect browser AppImages (e.g., Dolphin Anty) run in a sandboxed
+  # process and cannot resolve "localhost" hostname. Use "127.0.0.1" instead.
+  # SSH tunnels must also bind to 0.0.0.0, not 127.0.0.1.
+  #
+  # PATTERN: proxy config strings containing "localhost" for SOCKS/HTTP proxies.
+  # -------------------------------------------------------------------------
+  # - id: no-localhost-in-browser-proxy
+  #   patterns:
+  #     - pattern-regex: 'socks5?://localhost'
+  #     - pattern-regex: 'http://localhost:\d+'
+  #   message: |
+  #     Anti-detect browser AppImages cannot resolve "localhost". Use "127.0.0.1":
+  #       socks5://127.0.0.1:1080  (NOT socks5://localhost:1080)
+  #     SSH tunnel must bind to 0.0.0.0:PORT, not 127.0.0.1:PORT.
+  #   languages: [typescript, javascript]
+  #   severity: ERROR
+
+  # -------------------------------------------------------------------------
+  # RULE: jsonb merge operator (||) in SQL — corrupts config objects
+  #
+  # WHY: In PostgreSQL, `config_json || '{"key":"val"}'::jsonb` wraps the
+  # object in an array when the left side is a non-object jsonb value. Also,
+  # JSON.stringify()::jsonb double-encodes strings. Always read the full config,
+  # modify in JS, then write back with sql.json().
+  #
+  # PATTERN: SQL template literals using || for jsonb merge.
+  # -------------------------------------------------------------------------
+  # - id: no-jsonb-merge-operator
+  #   pattern: |
+  #     sql`... || ${"..."}::jsonb ...`
+  #   message: |
+  #     jsonb || merge corrupts config — wraps object in array. Never partial-update
+  #     jsonb via ||. Instead:
+  #       1. Read full config: const cfg = row.configJson
+  #       2. Modify in JS: cfg.key = value
+  #       3. Write back: sql`UPDATE t SET col = ${sql.json(cfg)}`
+  #     Also: never use JSON.stringify()::jsonb — it double-encodes.
+  #   languages: [typescript, javascript]
+  #   severity: ERROR
+
+  # -------------------------------------------------------------------------
+  # PROJECT-SPECIFIC RULES
+  # Add your rules below. Follow the pattern above: id, pattern, message,
+  # languages, severity. See https://semgrep.dev/docs/writing-rules/rule-syntax
+  # -------------------------------------------------------------------------

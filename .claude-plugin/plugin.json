@@ -1,7 +1,7 @@
 {
-  "name": "beast",
-  "version": "2.0.0",
-  "description": "Plan-to-code pipeline: automated planning with 5-actor verification, then TDD execution with parallel agents. Formerly beast-plan.",
+  "name": "beast-forge",
+  "version": "3.0.0",
+  "description": "Plan iron, verify real. Ironclad planning with independent verification chain. Turns any input into a bulletproof plan, executes with TDD, verifies with independent agents.",
   "author": {
     "name": "Dmitrii Malakhov"
   },
