@@ -31,6 +31,86 @@ Use `mode: "ralph"` with session_id. Phase prefix `bf-` distinguishes from plain
   "completed_steps":[],"slug":"task-name"}}
 ```
 
+## HUD Integration
+
+Beast-forge writes status to **two channels** on every phase transition:
+
+### 1. Statusline (via `state_write`)
+
+Shows `ralph:N/M` in the terminal statusbar. N = current forge iteration, M = max (default 5).
+
+Call `state_write` at each phase transition:
+```
+state_write(
+  mode: "ralph",
+  active: true,
+  iteration: <forge_iteration>,
+  max_iterations: <total_phases>,
+  current_phase: "bf-<phase>",
+  task_description: "<slug>",
+  session_id: <session_id>,
+  state: {
+    planning_mode: "beast-forge",
+    gates: { skeptic: "PASS"|"FAIL"|null, integration: ..., second_opinion: ... },
+    steps_done: N,
+    steps_total: M
+  }
+)
+```
+
+### 2. Rich status (via `notepad_write_priority`)
+
+Shows detailed progress in notepad (visible via `notepad_read`). Update at each transition:
+
+```
+notepad_write_priority(
+  content: "[FORGE] <PHASE> v<iter> | <gate_summary> | <steps_done>/<steps_total> steps"
+)
+```
+
+**Examples at each stage:**
+```
+[FORGE] PRECEDENT          | — | 0/8 stages
+[FORGE] RESEARCH           | — | 1/8 stages
+[FORGE] CHALLENGE          | — | 2/8 stages
+[FORGE] PLAN v1            | — | 3/8 stages
+[FORGE] REVIEW v1          | Skeptic:PASS Integration:— 2nd:— | 3/8 stages
+[FORGE] REVIEW v1          | Skeptic:PASS Integration:PASS 2nd:FAIL | 3/8 stages
+[FORGE] PLAN v2            | ↑ revising: 2nd opinion found P1 issue | 3/8 stages
+[FORGE] REVIEW v2          | Skeptic:PASS Integration:PASS 2nd:PASS | 3/8 stages
+[FORGE] EXECUTE            | ALL GATES PASSED | 5/7 steps done | 5/8 stages
+[FORGE] VERIFY             | Evidence:— Auditor:— | 6/8 stages
+[FORGE] VERIFY             | Evidence:PASS Auditor:PASS | 7/8 stages
+[FORGE] DOCS-REFRESH       | VERIFIED | 8/8 stages
+```
+
+### Phase map (for progress tracking)
+
+| # | Phase | Statusline `iteration` |
+|---|-------|----------------------|
+| 1 | PRECEDENT | 1 |
+| 2 | RESEARCH | 1 |
+| 3 | CHALLENGE | 1 |
+| 4 | PLAN | 1 |
+| 5 | REVIEW (loop) | forge_iteration |
+| 6 | EXECUTE | forge_iteration |
+| 7 | VERIFY | forge_iteration |
+| 8 | DOCS-REFRESH | forge_iteration |
+
+For the statusline `max_iterations`: use forge iteration cap (default 5) during PLAN/REVIEW loop. Switch to `8` (total stages) during EXECUTE onward.
+
+### On completion/failure
+
+```
+state_write(mode: "ralph", active: false, completed_at: <ISO>)
+notepad_write_priority(content: "[FORGE] DONE ✓ | <slug> | <total_time>")
+```
+
+On failure:
+```
+notepad_write_priority(content: "[FORGE] BLOCKED | <slug> | <reason>")
+```
+
 ---
 
 ## Machine 1: Plan Forge
@@ -52,6 +132,30 @@ Before touching code, search what the project already knows:
 2. **Grep `.omc/plans/`** (if exists) for past plans touching same systems. Note approach + outcome.
 3. **Read `docs/architecture/{system}.md`** (if exists) to understand current design.
 4. **Read CLAUDE.md `## Common Failures`** section (if exists) for known failure patterns.
+5. **Query `.omc/forge.db`** (if exists) — past forge runs, risk scores, cached spikes:
+   ```sql
+   -- Past runs on these systems
+   SELECT slug, status, iteration, json_extract(context, '$.lesson') as lesson
+   FROM forges WHERE systems LIKE '%<system>%' AND status IN ('completed','abandoned')
+   ORDER BY completed_at DESC LIMIT 5;
+
+   -- Risk scores
+   SELECT system, fail_rate, avg_iterations FROM system_risk
+   WHERE system IN ('<system1>', '<system2>');
+
+   -- Cached spikes (don't re-test confirmed assumptions)
+   SELECT assumption, result, actual FROM spikes
+   WHERE permanent = 1 OR tested_at > datetime('now', '-30 days');
+
+   -- Co-failure warnings
+   SELECT system_a, system_b, gate,
+     ROUND(1.0 * fail_count / total_count, 2) as fail_rate
+   FROM co_failures
+   WHERE (system_a IN ('<systems>') OR system_b IN ('<systems>'))
+     AND CAST(fail_count AS REAL) / total_count > 0.3;
+   ```
+   Surface: "reply-worker + engage-scheduler fail Integration 60% — include both in scope?"
+6. For large codebase scans, prefer `ctx_batch_execute` to keep research results in sandbox.
 
 ### RESEARCH — verify everything, assume nothing
 
@@ -212,9 +316,48 @@ GAPS FOUND →
   3. Ralph iteration++.
 
 VERIFIED →
-  E8: Doc sweep (update affected docs/, CLAUDE.md gotchas, INDEX.md).
+  E8: Docs Refresh (final stage — see below).
   Done.
 ```
+
+---
+
+## Machine 3: Docs Refresh (final stage)
+
+After verification passes, run a scoped documentation hygiene pass. This is the `/docs-refresh` skill integrated as beast-forge's closing stage.
+
+### What to check (scoped to touched systems)
+
+1. **CLAUDE.md gotchas** — did this work fix a gotcha? Remove it. Did it introduce a new danger? Add it. Still under 40-line target?
+2. **Memory files** — do any `arch-*` or `lesson-*` files reference systems that changed? Update or flag.
+3. **MEMORY.md index** — still under 180 lines? Any new entries needed? Any entries now stale?
+4. **docs/ vault** — do architecture docs, specs, or runbooks need updating for what changed?
+5. **Common Failures** — new pattern discovered during execution? Add it.
+
+### Scaling
+
+```
+Quick fix (<3 files)    → CLAUDE.md gotcha check only (30 seconds)
+Standard (3-10 files)   → CLAUDE.md + touched memory files + docs/ for affected systems
+Complex (10+)           → full /docs-refresh --scan-only, present triage to user
+```
+
+### Auto-create (forge-driven documentation)
+
+Machine 3 doesn't just audit — it GENERATES docs from forge results:
+
+1. **Permanent refuted spike → lesson file.** If a spike with `permanent=1` has no corresponding `lesson-*.md`, auto-create one in memory with the assumption, actual result, and "How to apply" section.
+2. **Gate finding repeated 3+ times → CLAUDE.md gotcha.** Query forge.db: `SELECT findings FROM gates WHERE result='FAIL' GROUP BY findings HAVING COUNT(*) >= 3`. If a finding repeats across forges, add it to CLAUDE.md gotchas section.
+3. **Architecture changed → update/create docs.** If the forge modified architecture files (new tables, new services, new data flow), update `docs/architecture/{system}.md` or create if missing.
+4. **Forge lesson → memory file.** On `--complete`, if a lesson was recorded, check if it's already in memory. If not, auto-create `lesson-{slug}.md`.
+
+### Rules
+
+- NEVER skip this stage. Even a 30-second gotcha check catches stale docs early.
+- For complex work, run `/docs-refresh --scan-only` and include the triage in the completion report.
+- New gotcha? Add to CLAUDE.md. Fixed gotcha? Remove from CLAUDE.md.
+- Memory approaching 180 lines? Flag to user, suggest `/docs-refresh` standalone run.
+- Auto-created docs are DRAFTS — present to user before committing. Exception: CLAUDE.md gotchas from 3+ repeated findings can be auto-added.
 
 ---
 
@@ -230,13 +373,91 @@ Verdict: CLEAN | SUSPECT [list]
 
 ---
 
-## Flags
+## Iron Rules (IMMUTABLE — meta-learning CANNOT override)
+
+These rules prevent the self-optimizing system from removing its own safety checks.
+
+1. **2+ independent review gates on every plan.** No exceptions.
+   Meta-learning may reorder, add, specialize — NEVER reduce below 2.
+2. **Gates = separate agents.** Planner ≠ reviewer. No shared context between planner and gate agent.
+3. **Pipeline adaptation is project-scoped.** Gate ordering, risk thresholds — NEVER auto-propagate between projects.
+4. **Additive = auto. Subtractive = human.** Adding a checkpoint: auto. Removing a gate: requires explicit human approval.
+
+---
+
+## Forge Commands
+
+Beast-forge manages persistent work units ("forges") that survive across sessions.
+
 ```
-/beast-forge "task"            — standard: forge → execute → verify
+/beast-forge "task"              — create new forge, start pipeline
+/beast-forge --park [reason]     — park current forge, save context to forge.db
+/beast-forge --resume [slug]     — resume parked forge, restore context
+/beast-forge --spawn "sub-task"  — create child forge (optionally --blocks-parent)
+/beast-forge --switch [slug]     — park current + resume another (atomic)
+/beast-forge --list              — show all forges with status
+/beast-forge --status            — deep status of current forge + dependency tree
+/beast-forge --complete          — mark done, record lesson, unblock dependents
+/beast-forge --abandon [reason]  — mark abandoned, preserve context
+/beast-forge --full "task"       — extended RESEARCH + mandatory spike
+/beast-forge --discuss "task"    — extended CLARIFY for vague input
+/beast-forge --plan-only         — stop after FINAL-PLAN
+/beast-forge --execute           — load existing FINAL-PLAN, skip forge
+/beast-forge --no-docs           — skip docs-refresh final stage
+```
+
+### Forge persistence
+
+All forge state lives in `.omc/forge.db` (SQLite). This is the sole source of truth.
+`ralph-state.json` is a HUD display cache only — OMC may delete it on SessionEnd.
+
+On every phase transition:
+1. Update forge.db (via SQL or forge-crud.mjs functions)
+2. Update ralph-state.json (via state_write MCP tool) for HUD display
+3. forge.db `current_state` table tracks the active forge for compaction recovery
+
+### Compaction recovery
+
+If `/compact` happens mid-forge, the PreCompact hook saves state to forge.db and injects a recovery prompt. After compaction, read forge.db `current_state` and resume:
+```sql
+SELECT value FROM current_state WHERE key = 'active_forge';
+```
+
+### Recording gate results and spikes
+
+After each gate completes, record to forge.db:
+```sql
+INSERT INTO gates (forge_id, iteration, gate, result, findings)
+VALUES (<id>, <iter>, 'skeptic', 'PASS', '["no mirages found"]');
+```
+
+After each spike:
+```sql
+INSERT INTO spikes (forge_id, assumption, result, actual, permanent)
+VALUES (<id>, 'Dolphin supports concurrent tabs', 'refuted', '1 tab per profile', 1);
+```
+
+### Spawn workflow
+
+During RESEARCH or EXECUTE, if a sub-task is discovered:
+```
+/beast-forge --spawn "fix batch recovery" --blocks-parent
+```
+- Creates child forge with parent_id = current forge
+- If `--blocks-parent`: current forge → status 'blocked', blocked_by = child
+- When child completes → SQL trigger auto-unblocks parent
+- Child's findings available to parent's PRECEDENT via forge.db queries
+
+---
+
+## Flags (legacy, see Forge Commands above)
+```
+/beast-forge "task"            — standard: forge → execute → verify → docs-refresh
 /beast-forge --full "task"     — extended RESEARCH + mandatory spike on riskiest assumption
 /beast-forge --discuss "task"  — extended CLARIFY for vague input
 /beast-forge --plan-only       — stop after FINAL-PLAN, don't execute
 /beast-forge --execute         — load existing FINAL-PLAN, skip forge
+/beast-forge --no-docs         — skip docs-refresh final stage
 ```
 
 ---
