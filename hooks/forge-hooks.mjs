@@ -106,7 +106,7 @@ async function handleSessionStart() {
 
     for (const s of stale) {
       if (s.days > 30) {
-        issues.push(`stale ${s.days}d "${s.slug}" at ${s.phase} — consider /beast-forge --abandon`);
+        issues.push(`stale ${s.days}d "${s.slug}" at ${s.phase} — consider /forge --abandon`);
       } else {
         issues.push(`parked ${s.days}d "${s.slug}" at ${s.phase}`);
       }
@@ -216,7 +216,7 @@ async function handlePreCompact() {
       : "none yet";
 
     const recovery = [
-      `You were running beast-forge. Resume from where you left off.`,
+      `You were running Forge. Resume from where you left off.`,
       ``,
       `Forge: "${forge.slug}" (id: ${forge.id})`,
       `Phase: ${forge.phase}, iteration ${forge.iteration}`,
@@ -225,7 +225,7 @@ async function handlePreCompact() {
       `Systems: ${forge.systems}`,
       ``,
       `To resume: read the plan file and continue the pipeline from phase ${forge.phase}.`,
-      `Run: /beast-forge --resume ${forge.slug}`,
+      `Run: /forge --resume ${forge.slug}`,
     ].filter(Boolean).join("\n");
 
     console.log(JSON.stringify({ continue: true, systemMessage: recovery }));

@@ -1,9 +1,9 @@
 ---
-name: beast-setup
+name: forge-setup
 description: "One-time project setup for forge: creates docs/ vault, .semgrep/ rules, CLAUDE.md sections"
 ---
 
-# Beast Setup
+# Forge Setup
 
 One-time setup to get the most from forge. Run this once per project.
 
@@ -55,7 +55,7 @@ If no CLAUDE.md exists, create a minimal one with project name + these sections.
 
 Show what was created and what's ready:
 ```
-Beast Forge setup complete:
+Forge setup complete:
   ✓ docs/ vault (6 INDEX.md files)
   ✓ .semgrep/ rules (N starter rules)
   ✓ CLAUDE.md updated (Common Failures + Project Docs)

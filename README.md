@@ -1,10 +1,10 @@
-# beast
+# Forge
 
 **Ore in, steel out.**
 
-A blacksmith doesn't blame the ore. It smelts, shapes, tempers, and quenches — until what comes out holds an edge. Beast does the same with code: takes any task, however raw, and forges it through planning gates, independent review, and verified execution until the result is proven to work.
+A blacksmith doesn't blame the ore. It smelts, shapes, tempers, and quenches — until what comes out holds an edge. Forge does the same with code: takes any task, however raw, and pushes it through planning gates, independent review, and verified execution until the result is proven to work.
 
-Claude Code plugin. Three skills: planning pipeline, docs hygiene, content pipeline. Persistent memory that learns from every run.
+Claude Code plugin. Two skills: planning pipeline and docs hygiene. Persistent memory that learns from every run.
 
 ```
 "fix the auth bug" → research → plan → 2 independent reviews → TDD execute → independent verify → done
@@ -13,9 +13,8 @@ Claude Code plugin. Three skills: planning pipeline, docs hygiene, content pipel
 ## Install
 
 ```bash
-# Clone and run the installer
-git clone https://github.com/malakhov-dmitrii/forge.git ~/.claude/plugins/beast
-bun run ~/.claude/plugins/beast/scripts/install.mjs
+git clone https://github.com/malakhov-dmitrii/forge.git ~/.claude/plugins/forge
+bun run ~/.claude/plugins/forge/scripts/install.mjs
 ```
 
 The installer symlinks skills, registers hooks in `settings.json`, and initializes the knowledge database.
@@ -46,7 +45,7 @@ Two machines work in sequence:
 
 ### `/docs-refresh` — documentation hygiene
 
-Audits all project docs for freshness. Deletes what's dead, updates what drifted, compresses what's bloated. Also runs as beast-forge's final stage.
+Audits all project docs for freshness. Deletes what's dead, updates what drifted, compresses what's bloated. Also runs as Forge's final stage.
 
 ```
 /docs-refresh                — full audit: memory, CLAUDE.md, lessons, references
@@ -54,19 +53,9 @@ Audits all project docs for freshness. Deletes what's dead, updates what drifted
 /docs-refresh --memory-only  — scope to memory files
 ```
 
-### `/content-forge` — content creation pipeline
-
-Same forge philosophy but for writing. Idea → angle → write → humanize → fact-check → voice-check → second opinion. Built for Habr, Telegram, any public content.
-
-```
-/content-forge "post about our auth migration"   — full pipeline
-/content-forge --habr "why we switched to X"      — Habr article with title variants
-/content-forge --humanize existing-draft.md       — de-AI an existing text
-```
-
 ## Forge Intelligence
 
-Every beast-forge run writes to a SQLite database (`.omc/forge.db`). The system learns from its own history.
+Every forge run writes to a SQLite database (`.omc/forge.db`). The system learns from its own history.
 
 **What it tracks:**
 - Gate results per iteration (which reviews failed, what they found)
@@ -132,35 +121,33 @@ After verification: check if this work created new gotchas, obsoleted old docs, 
 
 ```
 skills/
-  forge/SKILL.md       # Planning pipeline specification
-  docs-refresh/SKILL.md      # Documentation hygiene
-  content-forge/SKILL.md     # Content creation pipeline
+  forge/SKILL.md                 # Planning pipeline specification
+  docs-refresh/SKILL.md          # Documentation hygiene
 
 hooks/
-  forge-schema.mjs           # SQLite schema, migrations, triggers
-  forge-crud.mjs             # CRUD operations, risk aggregation
-  forge-hooks.mjs            # SessionStart/End/PreCompact handlers
-  forge-global.mjs           # Cross-project knowledge DB
+  forge-schema.mjs               # SQLite schema, migrations, triggers
+  forge-crud.mjs                 # CRUD operations, risk aggregation
+  forge-hooks.mjs                # SessionStart/End/PreCompact handlers
+  forge-global.mjs               # Cross-project knowledge DB
 
 agents/
-  skeptic.md                 # Mirage hunter — verifies claims against reality
-  evidence-collector.md      # Independent verification, no executor access
-  auditor.md                 # Spot-checks evidence, catches gaps
-  researcher.md              # Deep codebase investigation
-  planner.md                 # Concrete, testable plans
-  ...                        # 13 agents total
+  skeptic.md                     # Mirage hunter — verifies claims against reality
+  evidence-collector.md          # Independent verification, no executor access
+  auditor.md                     # Spot-checks evidence, catches gaps
+  researcher.md                  # Deep codebase investigation
+  planner.md                     # Concrete, testable plans
+  ...                            # 13 agents total
 
 commands/
-  beast-forge.md             # Main command
-  beast-setup.md             # One-time project setup
-  content-forge.md           # Content pipeline command
+  forge.md                       # Main command
+  forge-setup.md                 # One-time project setup
 
 templates/
-  semgrep-starter.yml        # Starter gotcha rules
-  docs-structure.md          # Knowledge vault template
+  semgrep-starter.yml            # Starter gotcha rules
+  docs-structure.md              # Knowledge vault template
 
 scripts/
-  install.mjs                # Symlinks, hook registration, DB init
+  install.mjs                    # Symlinks, hook registration, DB init
 ```
 
 ## HUD Integration

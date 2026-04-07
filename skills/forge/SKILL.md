@@ -10,7 +10,7 @@ Two machines: **Plan Forge** (refine until bulletproof) + **Verification Chain**
 ## When to Use
 - Task touches 3+ files or has unclear scope
 - Architecture decisions needed
-- User says "beast-forge", "beast plan", or task needs verified planning
+- User says "forge", "forge plan", or task needs verified planning
 - Previous attempt failed — need to reassess
 
 ## Scaling
@@ -25,7 +25,7 @@ Vague input                    → PLAN FORGE --discuss → rest as standard
 Use `mode: "ralph"` with session_id. Phase prefix `bf-` distinguishes from plain ralph.
 ```json
 {"mode":"ralph","session_id":"<session>","current_phase":"bf-forge|bf-execute|bf-verify",
- "state":{"planning_mode":"beast-forge","forge_iteration":1,
+ "state":{"planning_mode":"forge","forge_iteration":1,
   "gates":{"skeptic":null,"integration":null,"second_opinion":null},
   "verify":{"evidence":null,"auditor":null},
   "completed_steps":[],"slug":"task-name"}}
@@ -33,7 +33,7 @@ Use `mode: "ralph"` with session_id. Phase prefix `bf-` distinguishes from plain
 
 ## HUD Integration
 
-Beast-forge writes status to **two channels** on every phase transition:
+Forge writes status to **two channels** on every phase transition:
 
 ### 1. Statusline (via `state_write`)
 
@@ -50,7 +50,7 @@ state_write(
   task_description: "<slug>",
   session_id: <session_id>,
   state: {
-    planning_mode: "beast-forge",
+    planning_mode: "forge",
     gates: { skeptic: "PASS"|"FAIL"|null, integration: ..., second_opinion: ... },
     steps_done: N,
     steps_total: M
@@ -324,7 +324,7 @@ VERIFIED →
 
 ## Machine 3: Docs Refresh (final stage)
 
-After verification passes, run a scoped documentation hygiene pass. This is the `/docs-refresh` skill integrated as beast-forge's closing stage.
+After verification passes, run a scoped documentation hygiene pass. This is the `/docs-refresh` skill integrated as Forge's closing stage.
 
 ### What to check (scoped to touched systems)
 
@@ -387,7 +387,7 @@ These rules prevent the self-optimizing system from removing its own safety chec
 
 ## Forge Commands
 
-Beast-forge manages persistent work units ("forges") that survive across sessions.
+Forge manages persistent work units ("forges") that survive across sessions.
 
 ```
 /forge "task"              — create new forge, start pipeline
@@ -464,10 +464,10 @@ During RESEARCH or EXECUTE, if a sub-task is discovered:
 
 ## Project Setup
 
-Run `/beast setup` once per project to get the most from beast-forge:
+Run `/forge-setup` once per project to get the most from Forge:
 - Creates docs/ vault structure with INDEX.md navigation
 - Creates .semgrep/ with starter rules (if semgrep installed)
 - Adds Common Failures + Project Docs sections to CLAUDE.md
 - Checks for optional tools (semgrep, scc, codex)
 
-Beast-forge works WITHOUT setup — it just greps whatever exists. Setup makes it better.
+Forge works WITHOUT setup — it just greps whatever exists. Setup makes it better.
