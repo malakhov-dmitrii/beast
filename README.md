@@ -1,186 +1,198 @@
-# beast-forge
+# beast
 
-**Plan iron, verify real.**
+**Ore in, steel out.**
 
-Claude Code plugin that turns any task description — even vague ones — into an ironclad plan, executes it with TDD, and independently verifies the result with agents that have never seen the executor's work.
+A blacksmith doesn't blame the ore. It smelts, shapes, tempers, and quenches — until what comes out holds an edge. Beast does the same with code: takes any task, however raw, and forges it through planning gates, independent review, and verified execution until the result is proven to work.
+
+Claude Code plugin. Three skills: planning pipeline, docs hygiene, content pipeline. Persistent memory that learns from every run.
 
 ```
-"fix the auth bug" → Plan Forge refines it → Execute with TDD → Verification Chain proves it's done
+"fix the auth bug" → research → plan → 2 independent reviews → TDD execute → independent verify → done
 ```
-
-## Why
-
-Claude Code is great at writing code. It's not great at:
-
-- **Knowing when it's actually done.** It says "complete" — two days later you find half the work is missing.
-- **Checking its own work.** The same agent that wrote the code reviews the code. Confirmation bias is built in.
-- **Learning from mistakes.** The 7th task makes the same class of errors as the 1st.
-- **Surfacing what it doesn't know.** It assumes instead of verifying, carries phantom APIs through an entire plan.
-
-Beast-forge fixes this with two machines:
-
-**Plan Forge** — a refinement loop that greps your project's CLAUDE.md for gotchas, searches past plans for precedents, spikes risky assumptions, gets a second opinion from a different AI model, and cycles until two independent reviewers find zero issues.
-
-**Verification Chain** — two agents who have *never seen the executor's output* independently verify every acceptance criterion by running the actual commands, then an auditor spot-checks 30-50% of the evidence to catch fakes and gaps.
 
 ## Install
 
 ```bash
-claude plugin install https://github.com/malakhov-dmitrii/beast.git
+# Clone and run the installer
+git clone https://github.com/malakhov-dmitrii/beast.git ~/.claude/plugins/beast
+bun run ~/.claude/plugins/beast/scripts/install.mjs
 ```
 
-Then, one-time per project:
+The installer symlinks skills, registers hooks in `settings.json`, and initializes the knowledge database.
 
-```bash
-/beast setup
-```
+## Skills
 
-This creates a `docs/` vault, starter semgrep rules, and adds failure tracking sections to your CLAUDE.md.
+### `/beast-forge` — planning + execution + verification
 
-## Usage
+The main pipeline. Takes a task from idea to verified implementation.
 
 ```
-/beast-forge "add rate limiting to the API"     # plan → execute → verify
-/beast-forge --full "migrate to new auth system" # extended research + spike
-/beast-forge --discuss "make engagement better"  # refines vague input first
-/beast-forge --plan-only                         # plan without executing
-/beast-forge --execute                           # execute an existing plan
+/beast-forge "add rate limiting to the API"      — plan → execute → verify
+/beast-forge --full "migrate to new auth system"  — deeper research + spike
+/beast-forge --discuss "improve engagement"       — clarify vague input first
+/beast-forge --plan-only                          — stop after final plan
 ```
+
+Two machines work in sequence:
+
+**Plan Forge** — refinement loop. Searches your project's gotchas, past plans, and architecture docs. Spikes risky assumptions. Gets a second opinion from a different AI model. Cycles until two independent reviewers find zero issues. Max 5 iterations.
+
+**Verification Chain** — two agents who have *never seen the executor's output* independently verify every acceptance criterion. An auditor spot-checks 30-50% of the evidence. Gaps get fed back to execution.
+
+**Iron rules** (hardcoded, system can't override):
+- Minimum 2 independent review gates on every plan
+- Planner ≠ reviewer. No shared context.
+- Pipeline config is project-scoped. Never auto-propagates between projects.
+
+### `/docs-refresh` — documentation hygiene
+
+Audits all project docs for freshness. Deletes what's dead, updates what drifted, compresses what's bloated. Also runs as beast-forge's final stage.
+
+```
+/docs-refresh                — full audit: memory, CLAUDE.md, lessons, references
+/docs-refresh --scan-only    — report only, no changes
+/docs-refresh --memory-only  — scope to memory files
+```
+
+### `/content-forge` — content creation pipeline
+
+Same forge philosophy but for writing. Idea → angle → write → humanize → fact-check → voice-check → second opinion. Built for Habr, Telegram, any public content.
+
+```
+/content-forge "post about our auth migration"   — full pipeline
+/content-forge --habr "why we switched to X"      — Habr article with title variants
+/content-forge --humanize existing-draft.md       — de-AI an existing text
+```
+
+## Forge Intelligence
+
+Every beast-forge run writes to a SQLite database (`.omc/forge.db`). The system learns from its own history.
+
+**What it tracks:**
+- Gate results per iteration (which reviews failed, what they found)
+- Spike cache (confirmed/refuted assumptions with TTL)
+- Risk scores per system (auto-aggregated from past failures)
+- Co-failure patterns (which pairs of systems tend to break together)
+
+**What it enables:**
+- `--park` / `--resume` — save work, come back in a new session
+- `--spawn "sub-task"` — create child forges with dependency tracking
+- Compaction survival — state preserved when context window resets
+- PRECEDENT phase queries past runs before planning ("last time this system needed 3 iterations")
+
+**Cross-project knowledge** lives in `~/.forge/global.db` — verified facts about tools and libraries that apply everywhere. Spikes about external tools get promoted automatically.
+
+Schema is versioned (`PRAGMA user_version`) — future updates migrate automatically.
 
 ## How It Works
 
 ### Plan Forge
 
-A refinement loop — not linear phases. Cycles until all gates pass.
-
 ```
-PRECEDENT ─── grep CLAUDE.md gotchas, past plans, docs/
-     │
-RESEARCH ──── read every touched file, grep all usages, spike <5 min
-     │
-CHALLENGE ─── second opinion (codex CLI or fresh opus agent)
-     │
-CLARIFY ───── self-decide what you can, ask user only for real design choices
-     │
-PLAN ──────── concrete steps, acceptance criteria (static + unit + e2e)
-     │
-REVIEW ────── 2 binary gates: Skeptic (0 mirages) + Integration (contracts safe)
-     │
-     └── fail? → loop back. Max 5 iterations.
+PRECEDENT ── gotchas, past plans, forge.db risk scores, cached spikes
+    │
+RESEARCH ─── read every file, grep all usages, spike anything testable in <5 min
+    │
+CHALLENGE ── second opinion on approach (codex CLI or fresh opus agent)
+    │
+PLAN ─────── concrete steps with acceptance criteria (static + unit + e2e)
+    │
+REVIEW ───── 2+ binary gates: Skeptic (mirages) + Second Opinion (production failures)
+    │
+    └── fail? → fix specific issue → re-run failed gate only → max 5 iterations
 ```
-
-**Spikes are not a phase — they're a principle.** Any time an assumption can be tested in under 5 minutes, test it. Don't carry it as an assumption.
-
-**Second opinion** uses OpenAI's Codex CLI for a genuinely independent review. If codex isn't installed, a fresh Claude agent with an adversarial prompt provides the challenge.
 
 ### Verification Chain
 
-After execution, three layers verify the work:
-
 ```
-Layer 0: Static ──── tsc, lsp, semgrep, scc (instant, every time)
-Layer 1: Unit ────── project test suite on changed modules
-Layer 2: E2E ─────── trigger real flows, check DB state, verify data pipeline
-Layer 3: Agents ──── Evidence Collector → Auditor (independent, no executor access)
+Layer 0: Static ── tsc, semgrep, lsp diagnostics
+Layer 1: Unit ──── test suite on changed modules
+Layer 2: E2E ───── trigger real flows, verify actual behavior
+Layer 3: Agents ── Evidence Collector (sonnet) → Auditor (opus), no executor access
 ```
 
-**Evidence Collector** (sonnet) takes only the FINAL-PLAN as input. For each acceptance criterion: runs the command, records the output, flags weak criteria that prove code was *written* but not that it *works*.
+### Docs Refresh (final stage)
 
-**Auditor** (opus) takes the Evidence Report. Re-runs 30-50% of commands (weighted toward integration tests), catches fake proofs, finds missing criteria, runs the full E2E scenario, checks for uncommitted changes.
+After verification: check if this work created new gotchas, obsoleted old docs, or discovered patterns worth recording. Auto-creates lesson files from permanent spikes, adds CLAUDE.md gotchas from repeated gate findings.
 
-If gaps are found → back to execution with a specific list. The failure pattern is added to CLAUDE.md so the system learns.
-
-### Micro-Verify
-
-For quick fixes that don't need the full forge:
+## Forge Commands
 
 ```
-After any direct executor:
-  lsp_diagnostics → semgrep → reference check → tests (<30s)
-  Verdict: CLEAN | SUSPECT [list]
+/beast-forge "task"              — new forge, start pipeline
+/beast-forge --park [reason]     — save state to forge.db
+/beast-forge --resume [slug]     — continue from where you left off
+/beast-forge --spawn "sub-task"  — child forge, optionally blocks parent
+/beast-forge --switch [slug]     — park current + resume another
+/beast-forge --list              — all forges with status
+/beast-forge --complete          — mark done, record lesson, unblock dependents
+/beast-forge --abandon [reason]  — mark abandoned, preserve context
 ```
 
 ## Project Structure
 
 ```
+skills/
+  beast-forge/SKILL.md       # Planning pipeline specification
+  docs-refresh/SKILL.md      # Documentation hygiene
+  content-forge/SKILL.md     # Content creation pipeline
+
+hooks/
+  forge-schema.mjs           # SQLite schema, migrations, triggers
+  forge-crud.mjs             # CRUD operations, risk aggregation
+  forge-hooks.mjs            # SessionStart/End/PreCompact handlers
+  forge-global.mjs           # Cross-project knowledge DB
+
 agents/
-  skeptic.md              # Mirage hunter — verifies plan claims against reality
-  evidence-collector.md   # Independent verification — no executor access
-  auditor.md              # Spot-checks evidence, catches fakes and gaps
-  researcher.md           # Deep codebase + dependency investigation
-  planner.md              # Writes concrete, testable plans
-  explorer.md             # Maps project structure and patterns
-  executor.md             # TDD implementation
-  architect.md            # Post-execution architectural review
-  simplifier.md           # Refactoring pass
-  qa-fixer.md             # Auto-fix loop for failing tests
+  skeptic.md                 # Mirage hunter — verifies claims against reality
+  evidence-collector.md      # Independent verification, no executor access
+  auditor.md                 # Spot-checks evidence, catches gaps
+  researcher.md              # Deep codebase investigation
+  planner.md                 # Concrete, testable plans
+  ...                        # 13 agents total
 
 commands/
-  beast-forge.md          # Main command — plan + execute + verify
-  beast-setup.md          # One-time project setup
-
-skills/
-  beast-forge/SKILL.md    # Core skill specification
+  beast-forge.md             # Main command
+  beast-setup.md             # One-time project setup
+  content-forge.md           # Content pipeline command
 
 templates/
-  semgrep-starter.yml     # Starter rules for project gotchas
-  docs-structure.md       # Knowledge vault structure
-  claude-md-additions.md  # CLAUDE.md sections to add
+  semgrep-starter.yml        # Starter gotcha rules
+  docs-structure.md          # Knowledge vault template
+
+scripts/
+  install.mjs                # Symlinks, hook registration, DB init
 ```
 
-## What `/beast setup` Creates
+## HUD Integration
+
+When a forge is active, the terminal statusline shows progress:
 
 ```
-your-project/
-├── docs/                        # Knowledge vault (git-tracked)
-│   ├── INDEX.md                 # Navigation
-│   ├── architecture/INDEX.md    # How systems work
-│   ├── decisions/INDEX.md       # Why you chose X over Y
-│   ├── specs/INDEX.md           # What features do
-│   ├── retros/INDEX.md          # What happened + lessons
-│   └── runbooks/INDEX.md        # How to operate
-├── .semgrep/rules.yml           # Project-specific gotcha rules
-└── CLAUDE.md                    # + Common Failures section
-                                 # + Project Docs reference
-```
-
-## Comparison
-
-| | beast-forge | Beast v2 | beast-lite (gstack) | OMC ralplan |
-|---|---|---|---|---|
-| Planning depth | PRECEDENT + RESEARCH + CHALLENGE + CLARIFY + PLAN | P1-P8 with stop hook | Frame + Research + Plan | Planner → Architect → Critic |
-| Verification | Evidence Collector + Auditor (independent) | Architect review | Skeptic + Critic | Critic only |
-| Persistence | Ralph (OMC) | Stop hook state machine | None | None |
-| Second opinion | Codex CLI / fresh opus | None | Spike | None |
-| Learning loop | CLAUDE.md Common Failures | None | Lessons dir | None |
-| Project setup | `/beast setup` (docs, semgrep, CLAUDE.md) | None | None | None |
-| Gotcha surfacing | Auto-grep CLAUDE.md per touched file | None | None | None |
-| Works without config | Yes | Yes | Yes | Yes |
-
-## Requirements
-
-- **Claude Code CLI** (required)
-- **semgrep** (optional) — project-specific gotcha rules as static analysis
-- **scc** (optional) — code complexity metrics for planning
-- **codex CLI** (optional) — cross-model second opinion. Falls back to fresh Claude agent.
-
-```bash
-# optional tools
-brew install semgrep scc
+forge:REV·2 S✓I✓2✗ +1parked     — Review iter 2, Skeptic pass, Integration pass, 2nd fail, 1 parked
+forge:EXE 4/6                    — Execute phase, 4 of 6 steps done
+forge:VER                        — Verification chain running
 ```
 
 ## Philosophy
 
-1. **Garbage in, iron out.** The system's job is to refine, not to require perfect input.
-2. **Verify independently.** The agent that wrote the code cannot verify the code. Separate agents, separate context.
-3. **Spike, don't theorize.** If you can test an assumption in 5 minutes, test it. Don't debate it for 30.
-4. **Learn from gaps.** Every verification failure is recorded. The same bug class should never happen twice.
-5. **Active, not passive.** Trigger checks, poll results, query state. Never wait for schedules.
+1. **Ore in, steel out.** The system refines, not rejects. Vague input gets clarified. Bad assumptions get spiked. Weak plans get tempered.
+2. **Verify independently.** The agent that shaped the metal cannot test the blade. Separate agents, no shared context.
+3. **Spike, don't theorize.** Five minutes of testing beats thirty minutes of debate.
+4. **The forge remembers.** Every run teaches the next one. Risk scores, cached spikes, co-failure patterns — knowledge compounds.
+5. **Iron rules hold.** Two independent reviews on every plan. The system can optimize within bounds, but cannot remove its own safety checks.
+
+## Requirements
+
+- [Bun](https://bun.sh) — runtime (for bun:sqlite in hooks)
+- [Claude Code](https://claude.ai/code) — AI coding assistant
+
+Optional:
+```bash
+brew install semgrep scc    # static analysis + complexity metrics
+```
+
+[Codex CLI](https://github.com/openai/codex) recommended for cross-model second opinion.
 
 ## License
 
-MIT
-
-## Author
-
-[Dmitrii Malakhov](https://github.com/malakhov-dmitrii)
+MIT — [Dmitrii Malakhov](https://github.com/malakhov-dmitrii)
