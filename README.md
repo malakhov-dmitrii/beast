@@ -14,7 +14,7 @@ Claude Code plugin. Three skills: planning pipeline, docs hygiene, content pipel
 
 ```bash
 # Clone and run the installer
-git clone https://github.com/malakhov-dmitrii/beast.git ~/.claude/plugins/beast
+git clone https://github.com/malakhov-dmitrii/forge.git ~/.claude/plugins/beast
 bun run ~/.claude/plugins/beast/scripts/install.mjs
 ```
 
@@ -22,15 +22,15 @@ The installer symlinks skills, registers hooks in `settings.json`, and initializ
 
 ## Skills
 
-### `/beast-forge` — planning + execution + verification
+### `/forge` — planning + execution + verification
 
 The main pipeline. Takes a task from idea to verified implementation.
 
 ```
-/beast-forge "add rate limiting to the API"      — plan → execute → verify
-/beast-forge --full "migrate to new auth system"  — deeper research + spike
-/beast-forge --discuss "improve engagement"       — clarify vague input first
-/beast-forge --plan-only                          — stop after final plan
+/forge "add rate limiting to the API"      — plan → execute → verify
+/forge --full "migrate to new auth system"  — deeper research + spike
+/forge --discuss "improve engagement"       — clarify vague input first
+/forge --plan-only                          — stop after final plan
 ```
 
 Two machines work in sequence:
@@ -118,21 +118,21 @@ After verification: check if this work created new gotchas, obsoleted old docs, 
 ## Forge Commands
 
 ```
-/beast-forge "task"              — new forge, start pipeline
-/beast-forge --park [reason]     — save state to forge.db
-/beast-forge --resume [slug]     — continue from where you left off
-/beast-forge --spawn "sub-task"  — child forge, optionally blocks parent
-/beast-forge --switch [slug]     — park current + resume another
-/beast-forge --list              — all forges with status
-/beast-forge --complete          — mark done, record lesson, unblock dependents
-/beast-forge --abandon [reason]  — mark abandoned, preserve context
+/forge "task"              — new forge, start pipeline
+/forge --park [reason]     — save state to forge.db
+/forge --resume [slug]     — continue from where you left off
+/forge --spawn "sub-task"  — child forge, optionally blocks parent
+/forge --switch [slug]     — park current + resume another
+/forge --list              — all forges with status
+/forge --complete          — mark done, record lesson, unblock dependents
+/forge --abandon [reason]  — mark abandoned, preserve context
 ```
 
 ## Project Structure
 
 ```
 skills/
-  beast-forge/SKILL.md       # Planning pipeline specification
+  forge/SKILL.md       # Planning pipeline specification
   docs-refresh/SKILL.md      # Documentation hygiene
   content-forge/SKILL.md     # Content creation pipeline
 

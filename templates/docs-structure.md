@@ -63,7 +63,7 @@ One file per feature or significant change. Covers:
 - Open questions / assumptions
 - Out of scope
 
-Specs are input to `/beast-forge`. Link the spec in your task description.
+Specs are input to `/forge`. Link the spec in your task description.
 
 ---
 

@@ -1,9 +1,9 @@
 ---
-name: beast-forge
-description: "Ironclad planning + independent verification. Turns any input into a bulletproof plan, executes with TDD, verifies with independent agents. Use for 3+ files or unclear scope."
+name: forge
+description: "Ore in, steel out. Planning pipeline with independent verification, persistent memory, and compounding knowledge. Use for 3+ files or unclear scope."
 ---
 
-# Beast Forge — Plan Iron, Verify Real
+# Forge — Ore In, Steel Out
 
 Two machines: **Plan Forge** (refine until bulletproof) + **Verification Chain** (prove it's actually done). Ralph provides persistence.
 
@@ -390,20 +390,20 @@ These rules prevent the self-optimizing system from removing its own safety chec
 Beast-forge manages persistent work units ("forges") that survive across sessions.
 
 ```
-/beast-forge "task"              — create new forge, start pipeline
-/beast-forge --park [reason]     — park current forge, save context to forge.db
-/beast-forge --resume [slug]     — resume parked forge, restore context
-/beast-forge --spawn "sub-task"  — create child forge (optionally --blocks-parent)
-/beast-forge --switch [slug]     — park current + resume another (atomic)
-/beast-forge --list              — show all forges with status
-/beast-forge --status            — deep status of current forge + dependency tree
-/beast-forge --complete          — mark done, record lesson, unblock dependents
-/beast-forge --abandon [reason]  — mark abandoned, preserve context
-/beast-forge --full "task"       — extended RESEARCH + mandatory spike
-/beast-forge --discuss "task"    — extended CLARIFY for vague input
-/beast-forge --plan-only         — stop after FINAL-PLAN
-/beast-forge --execute           — load existing FINAL-PLAN, skip forge
-/beast-forge --no-docs           — skip docs-refresh final stage
+/forge "task"              — create new forge, start pipeline
+/forge --park [reason]     — park current forge, save context to forge.db
+/forge --resume [slug]     — resume parked forge, restore context
+/forge --spawn "sub-task"  — create child forge (optionally --blocks-parent)
+/forge --switch [slug]     — park current + resume another (atomic)
+/forge --list              — show all forges with status
+/forge --status            — deep status of current forge + dependency tree
+/forge --complete          — mark done, record lesson, unblock dependents
+/forge --abandon [reason]  — mark abandoned, preserve context
+/forge --full "task"       — extended RESEARCH + mandatory spike
+/forge --discuss "task"    — extended CLARIFY for vague input
+/forge --plan-only         — stop after FINAL-PLAN
+/forge --execute           — load existing FINAL-PLAN, skip forge
+/forge --no-docs           — skip docs-refresh final stage
 ```
 
 ### Forge persistence
@@ -441,7 +441,7 @@ VALUES (<id>, 'Dolphin supports concurrent tabs', 'refuted', '1 tab per profile'
 
 During RESEARCH or EXECUTE, if a sub-task is discovered:
 ```
-/beast-forge --spawn "fix batch recovery" --blocks-parent
+/forge --spawn "fix batch recovery" --blocks-parent
 ```
 - Creates child forge with parent_id = current forge
 - If `--blocks-parent`: current forge → status 'blocked', blocked_by = child
@@ -452,12 +452,12 @@ During RESEARCH or EXECUTE, if a sub-task is discovered:
 
 ## Flags (legacy, see Forge Commands above)
 ```
-/beast-forge "task"            — standard: forge → execute → verify → docs-refresh
-/beast-forge --full "task"     — extended RESEARCH + mandatory spike on riskiest assumption
-/beast-forge --discuss "task"  — extended CLARIFY for vague input
-/beast-forge --plan-only       — stop after FINAL-PLAN, don't execute
-/beast-forge --execute         — load existing FINAL-PLAN, skip forge
-/beast-forge --no-docs         — skip docs-refresh final stage
+/forge "task"            — standard: forge → execute → verify → docs-refresh
+/forge --full "task"     — extended RESEARCH + mandatory spike on riskiest assumption
+/forge --discuss "task"  — extended CLARIFY for vague input
+/forge --plan-only       — stop after FINAL-PLAN, don't execute
+/forge --execute         — load existing FINAL-PLAN, skip forge
+/forge --no-docs         — skip docs-refresh final stage
 ```
 
 ---

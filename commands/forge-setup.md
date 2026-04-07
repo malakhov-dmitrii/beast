@@ -1,11 +1,11 @@
 ---
 name: beast-setup
-description: "One-time project setup for beast-forge: creates docs/ vault, .semgrep/ rules, CLAUDE.md sections"
+description: "One-time project setup for forge: creates docs/ vault, .semgrep/ rules, CLAUDE.md sections"
 ---
 
 # Beast Setup
 
-One-time setup to get the most from beast-forge. Run this once per project.
+One-time setup to get the most from forge. Run this once per project.
 
 ## Steps
 
@@ -63,5 +63,5 @@ Beast Forge setup complete:
   ✓ scc: installed
   ○ codex: not installed (optional, opus fallback active)
 
-Run /beast-forge "your task" to start.
+Run /forge "your task" to start.
 ```
