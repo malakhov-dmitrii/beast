@@ -123,12 +123,13 @@ export function spawnForge(cwd, { slug, systems, parentId, blocksParent = false,
 
 // ── Gates ───────────────────────────────────────────────
 
-export function recordGate(cwd, forgeId, iteration, gate, result, findings = []) {
+export function recordGate(cwd, forgeId, iteration, gate, result, findings = [], { blind = 1, inputsSeen = [], metaFindings = [] } = {}) {
   const db = openForgeDb(cwd);
   try {
     db.run(
-      `INSERT INTO gates (forge_id, iteration, gate, result, findings) VALUES (?, ?, ?, ?, ?)`,
-      [forgeId, iteration, gate, result, JSON.stringify(findings)]
+      `INSERT OR REPLACE INTO gates (forge_id, iteration, gate, result, findings, blind, inputs_seen, meta_findings)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [forgeId, iteration, gate, result, JSON.stringify(findings), blind, JSON.stringify(inputsSeen), JSON.stringify(metaFindings)]
     );
   } finally { db.close(); }
 }
@@ -156,6 +157,114 @@ export function searchSpikes(cwd, query) {
        AND (s.permanent = 1 OR s.tested_at > datetime('now', '-30 days'))
        ORDER BY sf.rank LIMIT 10`
     ).all(query);
+  } finally { db.close(); }
+}
+
+// ── Visionary ──────────────────────────────────────────
+
+export function recordVisionaryPass(cwd, forgeId, iteration, { passNumber, angle, agent, content }) {
+  const db = openForgeDb(cwd);
+  try {
+    db.run(
+      `INSERT OR IGNORE INTO visionary_passes (forge_id, iteration, pass_number, angle, agent, content)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [forgeId, iteration, passNumber, angle, agent, content]
+    );
+  } finally { db.close(); }
+}
+
+export function listVisionaryPasses(cwd, forgeId, iteration) {
+  const db = openForgeDb(cwd);
+  try {
+    return db.query(
+      `SELECT * FROM visionary_passes WHERE forge_id = ? AND iteration = ? ORDER BY pass_number`
+    ).all(forgeId, iteration);
+  } finally { db.close(); }
+}
+
+// ── Comparator ─────────────────────────────────────────
+
+export function recordComparatorReport(cwd, forgeId, iteration, { tldr, diffItems, realityCheck, recommendation }) {
+  const db = openForgeDb(cwd);
+  try {
+    // camelCase → snake_case mapping: diffItems → diff_items, realityCheck → reality_check
+    db.run(
+      `INSERT OR REPLACE INTO comparator_reports (forge_id, iteration, tldr, diff_items, reality_check, recommendation)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [forgeId, iteration, tldr, JSON.stringify(diffItems), JSON.stringify(realityCheck), recommendation]
+    );
+  } finally { db.close(); }
+}
+
+export function updateComparatorDecision(cwd, forgeId, iteration, decision) {
+  const db = openForgeDb(cwd);
+  try {
+    db.run(
+      `UPDATE comparator_reports SET user_decision = ? WHERE forge_id = ? AND iteration = ?`,
+      [decision, forgeId, iteration]
+    );
+  } finally { db.close(); }
+}
+
+export function getComparatorReport(cwd, forgeId, iteration) {
+  const db = openForgeDb(cwd);
+  try {
+    return db.query(
+      `SELECT * FROM comparator_reports WHERE forge_id = ? AND iteration = ?`
+    ).get(forgeId, iteration);
+  } finally { db.close(); }
+}
+
+// ── Claims ─────────────────────────────────────────────
+
+export function recordClaim(cwd, forgeId, iteration, stepNumber, { claimType, claimText, citation = null }) {
+  const db = openForgeDb(cwd);
+  try {
+    // camelCase → snake_case: claimType → claim_type, claimText → claim_text
+    db.run(
+      `INSERT INTO claim_validations (forge_id, iteration, step_number, claim_type, claim_text, citation)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [forgeId, iteration, stepNumber, claimType, claimText, citation]
+    );
+  } finally { db.close(); }
+}
+
+export function validateClaim(cwd, claimId, { result, notes = null }) {
+  const db = openForgeDb(cwd);
+  try {
+    // result → validation_result, notes → validation_notes
+    db.run(
+      `UPDATE claim_validations SET validation_result = ?, validation_notes = ? WHERE id = ?`,
+      [result, notes, claimId]
+    );
+  } finally { db.close(); }
+}
+
+export function listClaims(cwd, forgeId, iteration) {
+  const db = openForgeDb(cwd);
+  try {
+    return db.query(
+      `SELECT * FROM claim_validations WHERE forge_id = ? AND iteration = ? ORDER BY step_number, id`
+    ).all(forgeId, iteration);
+  } finally { db.close(); }
+}
+
+export function getClaimSummary(cwd, forgeId, iteration) {
+  const db = openForgeDb(cwd);
+  try {
+    const rows = db.query(
+      `SELECT claim_type, validation_result, COUNT(*) as count
+       FROM claim_validations WHERE forge_id = ? AND iteration = ?
+       GROUP BY claim_type, validation_result`
+    ).all(forgeId, iteration);
+
+    const summary = { fact: {}, design_bet: {}, strategic: {} };
+    for (const row of rows) {
+      const type = row.claim_type;
+      const result = row.validation_result || 'pending';
+      if (summary[type]) summary[type][result] = row.count;
+    }
+    return summary;
   } finally { db.close(); }
 }
 

@@ -16,7 +16,7 @@ import { execSync } from "node:child_process";
  * Schema version. Bump this when adding tables/columns/triggers.
  * Migration functions handle upgrading from any previous version.
  */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /** Resolve project .omc/ directory (git worktree aware) */
 export function resolveOmcRoot(cwd) {
@@ -54,8 +54,9 @@ function migrateIfNeeded(db) {
     ensureSchemaV1(db);
   }
 
-  // Future migrations go here:
-  // if (currentVersion < 2) { migrateV1toV2(db); }
+  if (currentVersion < 2) {
+    migrateV1toV2(db);
+  }
 
   db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
@@ -175,4 +176,61 @@ function ensureSchemaV1(db) {
   )`);
   db.run(`DELETE FROM forges WHERE status IN ('completed','abandoned')
     AND completed_at < datetime('now', '-180 days')`);
+}
+
+function migrateV1toV2(db) {
+  db.run("BEGIN IMMEDIATE");
+
+  // ALTER existing gates table — each wrapped in try/catch for idempotency
+  try { db.run("ALTER TABLE gates ADD COLUMN blind INTEGER DEFAULT 1"); } catch {}
+  try { db.run("ALTER TABLE gates ADD COLUMN inputs_seen TEXT DEFAULT '[]'"); } catch {}
+  try { db.run("ALTER TABLE gates ADD COLUMN meta_findings TEXT DEFAULT '[]'"); } catch {}
+
+  // Unique index on gates for INSERT OR REPLACE support
+  db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_gates_forge_iter_gate ON gates(forge_id, iteration, gate)");
+
+  // Visionary passes table
+  db.run(`CREATE TABLE IF NOT EXISTS visionary_passes (
+    id INTEGER PRIMARY KEY,
+    forge_id INTEGER NOT NULL REFERENCES forges(id),
+    iteration INTEGER NOT NULL,
+    pass_number INTEGER NOT NULL,
+    angle TEXT NOT NULL CHECK(angle IN ('simpler','better','blind_spots','custom')),
+    agent TEXT NOT NULL CHECK(agent IN ('codex','opus','gemini')),
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(forge_id, iteration, pass_number, angle)
+  )`);
+  db.run("CREATE INDEX IF NOT EXISTS idx_visionary_forge_iter ON visionary_passes(forge_id, iteration)");
+
+  // Comparator reports table
+  db.run(`CREATE TABLE IF NOT EXISTS comparator_reports (
+    id INTEGER PRIMARY KEY,
+    forge_id INTEGER NOT NULL REFERENCES forges(id),
+    iteration INTEGER NOT NULL,
+    tldr TEXT NOT NULL,
+    diff_items TEXT NOT NULL DEFAULT '[]',
+    reality_check TEXT NOT NULL DEFAULT '{}',
+    recommendation TEXT NOT NULL CHECK(recommendation IN ('standard','visionary','merge')),
+    user_decision TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(forge_id, iteration)
+  )`);
+
+  // Claim validations table
+  db.run(`CREATE TABLE IF NOT EXISTS claim_validations (
+    id INTEGER PRIMARY KEY,
+    forge_id INTEGER NOT NULL REFERENCES forges(id),
+    iteration INTEGER NOT NULL,
+    step_number INTEGER NOT NULL,
+    claim_type TEXT NOT NULL CHECK(claim_type IN ('fact','design_bet','strategic')),
+    claim_text TEXT NOT NULL,
+    citation TEXT,
+    validation_result TEXT CHECK(validation_result IN ('verified','mirage','unverifiable','pending')),
+    validation_notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  db.run("CREATE INDEX IF NOT EXISTS idx_claims_forge_iter ON claim_validations(forge_id, iteration)");
+
+  db.run("COMMIT");
 }

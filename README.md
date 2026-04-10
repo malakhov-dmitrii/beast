@@ -4,7 +4,7 @@
 
 A blacksmith doesn't blame the ore. It smelts, shapes, tempers, and quenches — until what comes out holds an edge. Forge does the same with code: takes any task, however raw, and pushes it through planning gates, independent review, and verified execution until the result is proven to work.
 
-Claude Code plugin. Two skills: planning pipeline and docs hygiene. Persistent memory that learns from every run.
+Claude Code plugin. Three skills: planning pipeline, docs hygiene, and code hygiene. Persistent memory that learns from every run.
 
 ```
 "fix the auth bug" → research → plan → 2 independent reviews → TDD execute → independent verify → done
@@ -52,6 +52,18 @@ Audits all project docs for freshness. Deletes what's dead, updates what drifted
 /docs-refresh --scan-only    — report only, no changes
 /docs-refresh --memory-only  — scope to memory files
 ```
+
+### `/code-hygiene` — codebase health analysis
+
+Runs static analysis tools, interprets findings, maps architecture, evaluates test quality. Stores structured results in `.omc/hygiene/` for tracking over time.
+
+```
+/code-hygiene                    — full scan (adaptive: inline or agents based on project size)
+/code-hygiene --module src/auth  — scope to specific directory
+/code-hygiene --deep             — include mutation testing (slow)
+```
+
+Tool-first approach: runs tsc, scc, semgrep, knip, jscpd, dependency-cruiser — then interprets JSON output. Produces a health score (0-100), severity-classified findings (P0-P3), architecture overview with mermaid diagrams, and test quality analysis. P0/P1 findings can be turned into parked forge tasks for refactoring.
 
 ## Forge Intelligence
 

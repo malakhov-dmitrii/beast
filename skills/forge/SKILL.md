@@ -86,18 +86,23 @@ notepad_write_priority(
 
 ### Phase map (for progress tracking)
 
-| # | Phase | Statusline `iteration` |
-|---|-------|----------------------|
-| 1 | PRECEDENT | 1 |
-| 2 | RESEARCH | 1 |
-| 3 | CHALLENGE | 1 |
-| 4 | PLAN | 1 |
-| 5 | REVIEW (loop) | forge_iteration |
-| 6 | EXECUTE | forge_iteration |
-| 7 | VERIFY | forge_iteration |
-| 8 | DOCS-REFRESH | forge_iteration |
+| # | Phase | Description |
+|---|-------|-------------|
+| 1 | PRECEDENT | Search institutional knowledge |
+| 2 | RESEARCH | Read files, spike assumptions (top-3 mandatory) |
+| 3 | CHALLENGE | Independent review of approach |
+| 4 | CLARIFY | User questions + visionary mode selection |
+| 5 | PLAN-DRAFT | Write plan with typed claims |
+| 6 | VISIONARY | N parallel passes (optional) |
+| 7 | COMPARATOR | 3-tier classify + reality-check (if visionary ran) |
+| 8 | USER-DECIDE | Pick standard / visionary / merge |
+| 9 | PLAN-FINAL | Rewrite plan per decision |
+| 10 | REVIEW | Sealed blind parallel + stacked meta |
+| 11 | EXECUTE | Cascade gemini->opus, TDD |
+| 12 | VERIFY | Evidence + Auditor |
+| 13 | DOCS-REFRESH | Docs + DB sweep |
 
-For the statusline `max_iterations`: use forge iteration cap (default 5) during PLAN/REVIEW loop. Switch to `8` (total stages) during EXECUTE onward.
+For the statusline `max_iterations`: use forge iteration cap (default 5) during PLAN/REVIEW loop. Switch to `13` (total stages) during EXECUTE onward.
 
 ### On completion/failure
 
@@ -118,11 +123,10 @@ notepad_write_priority(content: "[FORGE] BLOCKED | <slug> | <reason>")
 Refinement loop. Two phases: draft the plan, then gate it. Cycles until all 3 gates pass.
 
 ```
-PRECEDENT → RESEARCH → CHALLENGE (approach) → CLARIFY → PLAN (draft)
-    → REVIEW: 3 gates (Skeptic + Integration + Second Opinion)
-    → ALL PASS? → FINAL-PLAN
-    → ANY FAIL? → fix specific issue → re-run failed gate(s) only
-    → Max 5 iterations total
+PRECEDENT → RESEARCH (+top-3 mandatory spikes) → CHALLENGE → CLARIFY (+visionary?) →
+  PLAN-DRAFT (typed claims) → [VISIONARY STREAM] → [COMPARATOR] → USER DECISION →
+  PLAN-FINAL → REVIEW (blind parallel + stacked meta) →
+  EXECUTE (cascade: gemini→opus) → VERIFY → DOCS-REFRESH (+DB sweep)
 ```
 
 ### PRECEDENT — search institutional knowledge first
@@ -185,20 +189,63 @@ If challenge reveals a fundamental flaw → revise approach before writing the p
 - Ask user ONLY for genuine design choices.
 - Format: structured questions with 2-3 options + recommendation + reasoning.
 
-### PLAN — write the plan draft
+#### Visionary stream question (ask at end of CLARIFY)
 
-Each step:
+Adaptive default based on scope:
+```
+Visionary stream — search for a "significantly better" approach?
+  a) skip        ← default if <3 files
+  b) 1 pass      ← default if 3-10 files
+  c) 3 passes    ← default if 10+ files
+  d) N passes    (any number, no token limit)
+```
+
+Save choice to `forges.context` as `visionary_mode`. If `--no-visionary` flag, auto-select `a`.
+
+### PLAN — write the plan draft with typed claims
+
+Each step MUST contain a `Claims:` block classifying every assertion:
+
+**fact:** — verifiable codebase statement
+  Required: `file:line` OR `doc#section` OR `spike:id` citation.
+  Skeptic verifies citation exists AND contains the claimed thing.
+
+**design_bet:** — reasoned guess about behavior
+  Required: `assumption:` + `validation_plan:` + `blast_radius:`
+
+**strategic:** — direction-level choice
+  Required: `rationale:` + `alternatives_considered:`
+
+NO global "% hard evidence" gate. Skeptic checks PER CLAIM:
+- fact: missing citation → mirage
+- fact: citation broken (file/line absent) → mirage
+- design_bet: missing validation_plan → mirage
+- strategic: missing alternatives_considered → mirage
+Plan with ANY mirage → FAIL Skeptic gate.
+
+Each step also gets `complexity: simple|complex`:
+- Author sets initial value
+- Auto-override to `complex` if step has `strategic:` claims OR touches 3+ files
+
+Step format:
 ```
 ### Step N: [Title]
 Do: [specific action]
-Files: [exact paths, verified in RESEARCH]
+Files: [exact paths]
+Complexity: simple|complex
+Claims:
+  - fact: [claim] — file:line
+  - design_bet: [claim]
+    assumption: ...
+    validation_plan: ...
+    blast_radius: ...
 Acceptance criteria:
-  - static: [type check, lsp diagnostics, semgrep — whatever project uses]
-  - unit: [specific test command + expected output]
-  - e2e: [command that proves the feature works end-to-end] (where applicable)
+  - static: [type check, lsp, semgrep]
+  - unit: [test command + expected]
+  - e2e: [command proving feature works] (where applicable)
 Failure mode: [what goes wrong]
 Fallback: [what to do]
-Checkpoint: true/false [true = verify before proceeding to next step]
+Checkpoint: true/false
 Depends on: [step numbers]
 ```
 
@@ -211,68 +258,131 @@ Plan MUST include:
 Read the project's CLAUDE.md for test/build/deploy commands. Don't invent — use what the project already has.
 E2E criteria use REAL commands the project actually uses (curl APIs, DB queries, CLI tools). NEVER wait for cron.
 
-### REVIEW — 3 binary gates on the WRITTEN plan
+### VISIONARY STREAM (optional, after PLAN-DRAFT, before REVIEW)
 
-All three must pass. Run Skeptic + Integration in parallel, then Second Opinion.
+If user chose visionary mode in CLARIFY (b, c, or d), run N parallel passes:
 
-| Gate | Agent | What it checks | Pass | Fail → |
-|------|-------|----------------|------|--------|
-| **Skeptic** | Fresh opus agent | Mirage detection: do referenced files, APIs, functions actually exist? | 0 mirages | → RESEARCH |
-| **Integration** | Fresh sonnet agent | Cross-system contracts: do types match, imports work, schemas align? | All contracts verified | → RESEARCH |
-| **Second Opinion** | Codex or fresh opus | Adversarial: what breaks in production? What's missing? | No P1 findings | → PLAN |
+| Pass | Angle | Agent | Reads | Question |
+|------|-------|-------|-------|----------|
+| 1 | simpler | opus or codex | PLAN-DRAFT only | "Is there a simpler approach?" |
+| 2 | better | codex preferred, opus fallback | PLAN-DRAFT only | "Could this be 10x better?" |
+| 3 | blind_spots | opus | **ORIGINAL USER REQUEST only** | "What is the user really trying to achieve?" |
 
-#### Second Opinion gate — detailed
+Agent prompt files at `~/.claude/plugins/forge/agents/visionary-simpler.md`, `visionary-better.md`, `visionary-blind-spots.md`.
 
-**Step 1:** Check codex availability
-```bash
-which codex
+Each pass:
+1. Spawn fresh Agent() with prompt from agent file
+2. Pass only the specified input (plan OR original request — NEVER both for blind_spots)
+3. Record result: `recordVisionaryPass(cwd, forgeId, iteration, { passNumber, angle, agent, content })`
+
+Passes run in parallel when possible (spawn multiple Agent() calls in one message).
+
+### COMPARATOR (mandatory if visionary ran — Iron Rule #6)
+
+Fresh opus agent reads: PLAN-DRAFT + all visionary passes + original user request.
+Agent prompt at `~/.claude/plugins/forge/agents/comparator.md`.
+
+**3-tier claim classification:**
+- `codebase-verifiable` → grep/read codebase → `verified` | `rejected`
+- `externally-verifiable` → WebSearch/context7 if available, else `needs-external-check`
+- `strategic` → present to user with tradeoffs, no verdict
+
+**Output to user (before REVIEW):**
+```
+TL;DR:
+  Standard:  [1-line]
+  Visionary: [1-line]
+  Main diff: [1-line]
+
+DIFF ITEMS:
+  - [item]: gain=[...], cost=[...], tier=[...], check=[✓/✗/unknown]
+
+REALITY CHECK:
+  Confirmed: [...]  Rejected: [...]  Unknown: [...]
+
+RECOMMENDATION: standard | visionary | merge
 ```
 
-**Step 2a (codex available):** Write plan to temp file, then:
-```bash
-# Review the plan for critical issues
-codex review "Review this implementation plan. Find critical issues, 
-  missing edge cases, race conditions, security holes, integration failures.
-  Score: PASS if no critical issues, FAIL with list if any found." \
-  --base $(git branch --show-current) \
-  -c 'model_reasoning_effort="high"'
-```
+User picks: standard | visionary | merge | edit manually.
+Record: `recordComparatorReport(cwd, forgeId, iteration, { tldr, diffItems, realityCheck, recommendation })`
+After user decides: `updateComparatorDecision(cwd, forgeId, iteration, decision)`
 
-If specific files are already identified in the plan:
-```bash
-# Challenge specific approach decisions
-codex exec "Read FINAL-PLAN at [path]. For each step, find how it could 
-  fail in production. Focus on: data integrity, concurrency, error handling, 
-  missing rollback. Be ruthless." \
-  -C $(pwd) -s read-only \
-  -c 'model_reasoning_effort="high"'
-```
+PLAN-FINAL is written (or rewritten) based on user's choice, then proceeds to REVIEW.
 
-**Step 2b (codex unavailable — fresh opus fallback):**
-```
-Agent(model="opus", prompt="You are a principal engineer who has NEVER 
-  seen this codebase or this plan before. Read the plan at [path]. 
-  For each step: how does it fail in production? What's missing? 
-  What would you push back on in a design review? 
-  Verdict: PASS (no critical issues) or FAIL [list].")
-```
+### REVIEW — sealed parallel-blind gates with stacked synthesis
 
-**Gate result:** PASS = no P1 critical findings. FAIL = revise the specific steps flagged, then re-run this gate only.
+#### Sealed Input Bundle Protocol
+
+Gates do NOT read `.omc/forge.db`. They do NOT look for other gate findings. Isolation is enforced by:
+1. Orchestrator prepares: plan path + original user request as text
+2. Skeptic Agent(model=opus) + Integration Agent(model=sonnet) spawned **in parallel, same message**
+3. Prompt explicitly states: "DO NOT read .omc/forge.db. You see ONLY the plan and the codebase."
+4. Both return findings as text in their Agent response
+5. Orchestrator writes BOTH to `gates` table (with `blind=1`) via `INSERT OR REPLACE` **after both return**
+6. Only THEN: spawn 2nd Opinion with [plan + skeptic findings + integration findings]
+7. 2nd Opinion writes to `gates` with `blind=0`, `meta_findings` populated
+
+#### Gate definitions
+
+**Skeptic** (blind, opus, fresh):
+- Verify every `fact:` claim citation (file exists, line contains claimed thing)
+- Verify every `design_bet:` has assumption + validation_plan + blast_radius
+- Verify every `strategic:` has rationale + alternatives_considered
+- Hunt for mirages (phantom files, APIs, functions)
+- PASS = zero mirages, all claims structurally valid
+
+**Integration** (blind, sonnet, fresh):
+- Cross-system contracts: types, imports, schemas align
+- Sequencing: step dependencies make sense
+- Scope: steps cover what plan promises
+- PASS = all contracts verified, no missing coverage
+
+**Second Opinion** (stacked, codex preferred / opus fallback):
+- Reads [plan + original request + skeptic findings + integration findings]
+- META-question: "What did these two miss?"
+- Focus: wrong frame, production scenarios, missing rollback, concurrency
+- Forbidden: re-checking what Skeptic or Integration already covered
+- PASS = no P1 meta-findings
+
+Record each gate: `recordGate(cwd, forgeId, iteration, gate, result, findings, { blind, inputsSeen, metaFindings })`
+
+ANY gate FAIL → revise plan, re-run failed gate(s) only, bump iteration.
+
+For typed claims, also record: `recordClaim(cwd, forgeId, iteration, stepNumber, { claimType, claimText, citation })` for each claim in the plan, then `validateClaim(cwd, claimId, { result, notes })` as Skeptic validates them.
 
 ### Output
 
-FINAL-PLAN saved to `.omc/plans/FINAL-PLAN-{slug}.md` (or project root if .omc doesn't exist). Present approval summary including all 3 gate results. User reviews → "ok" or corrects → proceed to EXECUTE.
+FINAL-PLAN saved to `.omc/plans/FINAL-PLAN-{slug}.md` (or project root if .omc doesn't exist). Present approval summary including all gate results. User reviews → "ok" or corrects → proceed to EXECUTE.
 
 ---
 
-## Execute (ralph persistence, TDD)
+## Execute (cascade, ralph persistence, TDD)
 
-1. Load FINAL-PLAN. Parse steps into tasks.
-2. Per step: **RED** (write failing test from acceptance criteria) → **GREEN** (minimal code to pass) → **REFACTOR**.
-3. Parallel where steps are independent. Serial where dependent.
-4. **Checkpoint steps** (`checkpoint: true`): run that step's acceptance criteria before proceeding. If fail → fix before next step.
-5. Static analysis on every change (whatever project has: tsc, lsp, semgrep, eslint...).
-6. After all steps → VERIFICATION CHAIN.
+### Cascade Execute (gemini → opus)
+
+Per step in PLAN-FINAL:
+```
+IF step.complexity == 'simple' AND `which gemini` available:
+  1. gemini exec (model: gemini-2.5-flash-preview, timeout: 90s)
+  2. Static analysis (tsc/lsp/semgrep)
+     FAIL → git checkout changed files, opus rewrites
+  3. Step acceptance criteria (unit tests)
+     FAIL → git checkout changed files, opus rewrites
+  4. opus REVIEW pass (read git diff only):
+     APPROVE → next step
+     REJECT → git checkout changed files, opus rewrites
+ELSE:
+  opus executes directly (standard path)
+```
+
+Token savings: ~70% per simple step (gemini ~5k + opus review ~3k vs opus-only ~25k).
+
+### TDD per step (unchanged)
+Per step: **RED** (write failing test from acceptance criteria) → **GREEN** (minimal code to pass) → **REFACTOR**.
+Parallel where steps are independent. Serial where dependent.
+**Checkpoint steps** (`checkpoint: true`): run acceptance criteria before proceeding.
+Static analysis on every change.
+After all steps → VERIFICATION CHAIN.
 
 ---
 
@@ -333,6 +443,17 @@ After verification passes, run a scoped documentation hygiene pass. This is the 
 3. **MEMORY.md index** — still under 180 lines? Any new entries needed? Any entries now stale?
 4. **docs/ vault** — do architecture docs, specs, or runbooks need updating for what changed?
 5. **Common Failures** — new pattern discovered during execution? Add it.
+6. **Knowledge Sweep (forge.db + global.db)**
+
+   **Auto-action (safe):**
+   - Orphaned `current_state` pointers (forge abandoned/completed) → DELETE
+   - `forges.plan_path` where file doesn't exist → SET NULL + flag
+   - Contradicting spikes (refuted then confirmed same assumption) → keep latest, mark old superseded
+
+   **Warn-only (user decides):**
+   - Parked forges >30 days → "consider /forge --abandon"
+   - `~/.forge/global.db` spikes >90 days without verification → "re-verify?"
+   - Stale global_patterns (>60 days unused) → "flag stale?"
 
 ### Scaling
 
@@ -382,6 +503,14 @@ These rules prevent the self-optimizing system from removing its own safety chec
 2. **Gates = separate agents.** Planner ≠ reviewer. No shared context between planner and gate agent.
 3. **Pipeline adaptation is project-scoped.** Gate ordering, risk thresholds — NEVER auto-propagate between projects.
 4. **Additive = auto. Subtractive = human.** Adding a checkpoint: auto. Removing a gate: requires explicit human approval.
+5. **Skeptic AND Integration MUST both be blind to each other on every plan.**
+   No rotation. No exceptions. Meta-learning may not change this.
+6. **Comparator CANNOT be skipped if visionary stream produced output.**
+   No visionary output may bypass classification.
+7. **Claim type cannot be downgraded to escape requirements.**
+   `fact:` → `strategic:` to dodge citation = mirage. Skeptic catches by checking claim shape.
+8. **Opus review pass on gemini-executed steps is MANDATORY.**
+   Gemini NEVER self-approves. Token savings do not override safety.
 
 ---
 
@@ -404,6 +533,7 @@ Forge manages persistent work units ("forges") that survive across sessions.
 /forge --plan-only         — stop after FINAL-PLAN
 /forge --execute           — load existing FINAL-PLAN, skip forge
 /forge --no-docs           — skip docs-refresh final stage
+/forge --no-visionary "task"  — skip visionary stream (equivalent to 'skip' in CLARIFY)
 ```
 
 ### Forge persistence
@@ -447,18 +577,6 @@ During RESEARCH or EXECUTE, if a sub-task is discovered:
 - If `--blocks-parent`: current forge → status 'blocked', blocked_by = child
 - When child completes → SQL trigger auto-unblocks parent
 - Child's findings available to parent's PRECEDENT via forge.db queries
-
----
-
-## Flags (legacy, see Forge Commands above)
-```
-/forge "task"            — standard: forge → execute → verify → docs-refresh
-/forge --full "task"     — extended RESEARCH + mandatory spike on riskiest assumption
-/forge --discuss "task"  — extended CLARIFY for vague input
-/forge --plan-only       — stop after FINAL-PLAN, don't execute
-/forge --execute         — load existing FINAL-PLAN, skip forge
-/forge --no-docs         — skip docs-refresh final stage
-```
 
 ---
 
