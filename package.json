@@ -1,0 +1,9 @@
+{
+  "name": "forge",
+  "version": "3.0.0-dev",
+  "type": "module",
+  "description": "Forge plugin — ore in, steel out. Plan forge + verification chain.",
+  "scripts": {
+    "test": "bun test hooks/__tests__"
+  }
+}

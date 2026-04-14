@@ -16,7 +16,7 @@ import { execSync } from "node:child_process";
  * Schema version. Bump this when adding tables/columns/triggers.
  * Migration functions handle upgrading from any previous version.
  */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 4;
 
 /** Resolve project .omc/ directory (git worktree aware) */
 export function resolveOmcRoot(cwd) {
@@ -56,6 +56,14 @@ function migrateIfNeeded(db) {
 
   if (currentVersion < 2) {
     migrateV1toV2(db);
+  }
+
+  if (currentVersion < 3) {
+    migrateV2toV3(db);
+  }
+
+  if (currentVersion < 4) {
+    migrateV3toV4(db);
   }
 
   db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
@@ -176,6 +184,77 @@ function ensureSchemaV1(db) {
   )`);
   db.run(`DELETE FROM forges WHERE status IN ('completed','abandoned')
     AND completed_at < datetime('now', '-180 days')`);
+}
+
+function migrateV2toV3(db) {
+  db.run("BEGIN IMMEDIATE");
+
+  try {
+    // streams table (ADR §6)
+    db.run(`CREATE TABLE IF NOT EXISTS streams (
+      id INTEGER PRIMARY KEY,
+      forge_id INTEGER NOT NULL REFERENCES forges(id),
+      stream_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending','running','green','failed','blocked')),
+      depends_on TEXT NOT NULL DEFAULT '[]',
+      touches_files TEXT NOT NULL DEFAULT '[]',
+      acceptance_criteria TEXT NOT NULL DEFAULT '[]',
+      verifier_cmd TEXT NOT NULL,
+      tdd_required INTEGER DEFAULT 1,
+      tdd_evidence TEXT DEFAULT '{}',
+      retries INTEGER DEFAULT 0,
+      refactor_notes TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT,
+      UNIQUE(forge_id, stream_id)
+    )`);
+
+    db.run("CREATE INDEX IF NOT EXISTS idx_streams_forge_status ON streams(forge_id, status)");
+
+    // integration_contracts table
+    db.run(`CREATE TABLE IF NOT EXISTS integration_contracts (
+      id INTEGER PRIMARY KEY,
+      forge_id INTEGER NOT NULL REFERENCES forges(id),
+      contract_name TEXT NOT NULL,
+      test_cmd TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending','pass','fail')) DEFAULT 'pending',
+      failure_output TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(forge_id, contract_name)
+    )`);
+
+    // FTS5 virtual table indexing acceptance_criteria + refactor_notes
+    db.run(`CREATE VIRTUAL TABLE IF NOT EXISTS streams_fts USING fts5(
+      acceptance_criteria, refactor_notes, content=streams, content_rowid=id
+    )`);
+
+    // AFTER INSERT trigger — direct column reads, no json_extract
+    db.run(`CREATE TRIGGER IF NOT EXISTS streams_ai AFTER INSERT ON streams BEGIN
+      INSERT INTO streams_fts(rowid, acceptance_criteria, refactor_notes)
+        VALUES (new.id, new.acceptance_criteria, new.refactor_notes);
+    END`);
+
+    // AFTER UPDATE trigger — contentless FTS5 delete+re-insert pattern
+    db.run(`CREATE TRIGGER IF NOT EXISTS streams_au
+      AFTER UPDATE OF acceptance_criteria, refactor_notes ON streams
+    BEGIN
+      INSERT INTO streams_fts(streams_fts, rowid, acceptance_criteria, refactor_notes)
+        VALUES ('delete', old.id, old.acceptance_criteria, old.refactor_notes);
+      INSERT INTO streams_fts(rowid, acceptance_criteria, refactor_notes)
+        VALUES (new.id, new.acceptance_criteria, new.refactor_notes);
+    END`);
+
+  } catch (e) {
+    db.run("ROLLBACK");
+    throw e;
+  }
+
+  db.run("COMMIT");
+}
+
+function migrateV3toV4(db) {
+  // Add red_tests column to streams for verifier superset enforcement (Task 3.1)
+  try { db.run("ALTER TABLE streams ADD COLUMN red_tests TEXT DEFAULT '[]'"); } catch {}
 }
 
 function migrateV1toV2(db) {

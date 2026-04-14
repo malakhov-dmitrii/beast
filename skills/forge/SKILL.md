@@ -202,6 +202,16 @@ Visionary stream — search for a "significantly better" approach?
 
 Save choice to `forges.context` as `visionary_mode`. If `--no-visionary` flag, auto-select `a`.
 
+### Planner agent selection (v3, flag-gated)
+Before invoking the planner agent, select it inline from the forge's flag:
+```js
+  const ctx = getForgeContext(cwd, forgeId);
+  Agent(subagent_type=(ctx?.pipelineV3 === true ? 'planner-v3' : 'planner'), ...)
+```
+
+planner-v3 emits DAG JSON + parallel claim fan-out per ADR §3.
+planner remains default for v2 forges.
+
 ### PLAN — write the plan draft with typed claims
 
 Each step MUST contain a `Claims:` block classifying every assertion:
@@ -357,6 +367,17 @@ FINAL-PLAN saved to `.omc/plans/FINAL-PLAN-{slug}.md` (or project root if .omc d
 ---
 
 ## Execute (cascade, ralph persistence, TDD)
+
+### Stream Cascade (v3, flag-gated)
+Before cascade, check feature flag:
+```js
+  const ctx = getForgeContext(cwd, forgeId);
+  if (ctx?.pipelineV3 === true) {
+    await fanOutStreams(cwd, forgeId, /* task spawner */);
+  } else {
+    // v2 linear cascade (existing behavior)
+  }
+```
 
 ### Cascade Execute (gemini → opus)
 
@@ -589,3 +610,31 @@ Run `/forge-setup` once per project to get the most from Forge:
 - Checks for optional tools (semgrep, scc, codex)
 
 Forge works WITHOUT setup — it just greps whatever exists. Setup makes it better.
+
+---
+
+## Integration Re-plan Hook (pipeline-v3)
+
+After all streams complete, the orchestrator evaluates integration contracts. Two outcomes:
+
+### Pass path — `dispatchIntegrationResult(cwd, forgeId, { allPass: true, lesson })`
+All contracts have status='pass'. Calls `completeForge(cwd, forgeId, lesson)`. Re-plan is NOT triggered.
+
+### Fail path — `dispatchIntegrationResult(cwd, forgeId, { allPass: false })`
+One or more contracts have status='fail'. Calls `reEnterPlanning(cwd, forgeId)`.
+
+`reEnterPlanning` does the following:
+1. Reads `integration_contracts WHERE status='fail' AND forge_id=?`
+2. Appends `{ iteration, contracts: [...], timestamp }` to `forges.context.integration_failure_history`
+3. Increments `forges.iteration` and sets `phase='bf-plan-draft'`
+4. Streams rows are **preserved** (not deleted) — they remain for reference during re-planning
+5. **Cap**: at `iteration >= 5`, calls `blockForge(cwd, forgeId, 'integration-replan cap (5) exceeded')` instead of incrementing
+
+### integration_disabled short-circuit
+If `configJson.integration_disabled` is set (or the forge context has `integrationDisabled: true`), skip the integration gate entirely — neither `completeForge` nor `reEnterPlanning` is invoked via this path. The forge proceeds directly to VERIFY.
+
+### API surface (hooks/forge-crud.mjs)
+```js
+reEnterPlanning(cwd, forgeId)
+dispatchIntegrationResult(cwd, forgeId, { allPass: boolean, lesson?: string })
+```

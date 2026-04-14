@@ -7,6 +7,13 @@
 
 import { openForgeDb } from "./forge-schema.mjs";
 
+// ── DB helper ──────────────────────────────────────────
+/** Open db, run fn(db), close unconditionally. Returns fn's result. */
+function withDb(cwd, fn) {
+  const db = openForgeDb(cwd);
+  try { return fn(db); } finally { db.close(); }
+}
+
 // ── Forge CRUD ──────────────────────────────────────────
 
 export function createForge(cwd, { slug, systems = [], parentId = null, priority = "medium" }) {
@@ -221,11 +228,12 @@ export function recordClaim(cwd, forgeId, iteration, stepNumber, { claimType, cl
   const db = openForgeDb(cwd);
   try {
     // camelCase → snake_case: claimType → claim_type, claimText → claim_text
-    db.run(
+    const result = db.run(
       `INSERT INTO claim_validations (forge_id, iteration, step_number, claim_type, claim_text, citation)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [forgeId, iteration, stepNumber, claimType, claimText, citation]
     );
+    return Number(result.lastInsertRowid);  // iter-6 C1 fix: matches createForge/spawnForge pattern
   } finally { db.close(); }
 }
 
@@ -351,6 +359,236 @@ export function getCurrentState(cwd) {
     const row = db.query("SELECT value FROM current_state WHERE key = 'active_forge'").get();
     return row ? JSON.parse(row.value) : null;
   } finally { db.close(); }
+}
+
+// ── Streams (pipeline-v3) ───────────────────────────────
+
+export function createStream(cwd, forgeId, { streamId, verifierCmd, touchesFiles = [], acceptanceCriteria = [], dependsOn = [] }) {
+  return withDb(cwd, db => {
+    const result = db.run(
+      `INSERT INTO streams (forge_id, stream_id, status, verifier_cmd, touches_files, acceptance_criteria, depends_on)
+       VALUES (?, ?, 'pending', ?, ?, ?, ?)`,
+      [forgeId, streamId, verifierCmd, JSON.stringify(touchesFiles), JSON.stringify(acceptanceCriteria), JSON.stringify(dependsOn)]
+    );
+    return Number(result.lastInsertRowid);
+  });
+}
+
+export function updateStreamStatus(cwd, streamRowId, status, completedAt = null) {
+  withDb(cwd, db => {
+    if (completedAt) {
+      db.run(`UPDATE streams SET status = ?, completed_at = ? WHERE id = ?`, [status, completedAt, streamRowId]);
+    } else {
+      db.run(`UPDATE streams SET status = ? WHERE id = ?`, [status, streamRowId]);
+    }
+  });
+}
+
+export function setTddEvidence(cwd, streamRowId, evidence) {
+  // Always writes both columns atomically
+  const refactorNotes = typeof evidence.refactor_notes === 'string' ? evidence.refactor_notes : '';
+  withDb(cwd, db => {
+    db.run(
+      `UPDATE streams SET tdd_evidence = ?, refactor_notes = ? WHERE id = ?`,
+      [JSON.stringify(evidence), refactorNotes, streamRowId]
+    );
+  });
+}
+
+export function listStreams(cwd, forgeId, statusFilter = null) {
+  return withDb(cwd, db => {
+    if (statusFilter) {
+      return db.query(`SELECT * FROM streams WHERE forge_id = ? AND status = ? ORDER BY id`).all(forgeId, statusFilter);
+    }
+    return db.query(`SELECT * FROM streams WHERE forge_id = ? ORDER BY id`).all(forgeId);
+  });
+}
+
+export function searchStreams(cwd, query) {
+  return withDb(cwd, db =>
+    db.query(
+      `SELECT s.* FROM streams_fts sf
+       JOIN streams s ON s.id = sf.rowid
+       WHERE streams_fts MATCH ?
+       ORDER BY sf.rank LIMIT 20`
+    ).all(query)
+  );
+}
+
+// ── Integration Contracts (pipeline-v3) ─────────────────
+
+export function createIntegrationContract(cwd, forgeId, { contractName, testCmd }) {
+  return withDb(cwd, db => {
+    const result = db.run(
+      `INSERT INTO integration_contracts (forge_id, contract_name, test_cmd) VALUES (?, ?, ?)`,
+      [forgeId, contractName, testCmd]
+    );
+    return Number(result.lastInsertRowid);
+  });
+}
+
+export function updateContractStatus(cwd, contractRowId, status, failureOutput = null) {
+  withDb(cwd, db => {
+    db.run(
+      `UPDATE integration_contracts SET status = ?, failure_output = ? WHERE id = ?`,
+      [status, failureOutput, contractRowId]
+    );
+  });
+}
+
+export function listIntegrationContracts(cwd, forgeId, statusFilter = null) {
+  return withDb(cwd, db => {
+    if (statusFilter) {
+      return db.query(`SELECT * FROM integration_contracts WHERE forge_id = ? AND status = ? ORDER BY id`).all(forgeId, statusFilter);
+    }
+    return db.query(`SELECT * FROM integration_contracts WHERE forge_id = ? ORDER BY id`).all(forgeId);
+  });
+}
+
+// ── Forge Context + Block (pipeline-v3) ──────────────────
+
+export function blockForge(cwd, forgeId, reason) {
+  withDb(cwd, db => {
+    db.run(
+      `UPDATE forges SET status = 'blocked', blocking_reason = ?, updated_at = datetime('now') WHERE id = ?`,
+      [reason, forgeId]
+    );
+  });
+}
+
+/**
+ * setForgeContext — scalar merge into forges.context JSON at $.key.
+ * Value is stored VERBATIM (scalars: boolean, number, string). Arrays/objects
+ * stored via this helper become JSON-encoded strings, NOT nested structures.
+ * Booleans: bind as JSON literal via json(?) so readback + JSON.parse round-trips
+ * to JS boolean, not SQLite-coerced integer 1/0.
+ * iter-5 readback test (getForgeContext(...).pipelineV3 === true) guards this codepath.
+ */
+export function setForgeContext(cwd, forgeId, key, value) {
+  withDb(cwd, db => {
+    const isBool = typeof value === 'boolean';
+    const sql = isBool
+      ? `UPDATE forges SET context = json_set(COALESCE(context,'{}'), ?, json(?)), updated_at = datetime('now') WHERE id = ?`
+      : `UPDATE forges SET context = json_set(COALESCE(context,'{}'), ?, ?), updated_at = datetime('now') WHERE id = ?`;
+    const bind = isBool
+      ? [('$.' + key), (value ? 'true' : 'false'), forgeId]
+      : [('$.' + key), value, forgeId];
+    db.run(sql, bind);
+  });
+}
+
+export function getForgeContext(cwd, forgeId, key = null) {
+  return withDb(cwd, db => {
+    const forge = db.query("SELECT context FROM forges WHERE id = ?").get(forgeId);
+    const ctx = forge && forge.context ? JSON.parse(forge.context) : {};
+    if (key !== null) return ctx[key];
+    return ctx;
+  });
+}
+
+/**
+ * discardStreamState — iter-7 Day-2 R2 discard-and-restart helper.
+ * Preserves: forges row, gates, claim_validations.
+ * Wipes: streams, integration_contracts, integration_failure_history from context.
+ * Resets: iteration=1, phase='bf-plan-draft', status='active'.
+ */
+export function discardStreamState(cwd, forgeId) {
+  withDb(cwd, db => {
+    db.run('BEGIN IMMEDIATE');
+    try {
+      db.run(`DELETE FROM integration_contracts WHERE forge_id = ?`, [forgeId]);
+      db.run(`DELETE FROM streams WHERE forge_id = ?`, [forgeId]);
+      db.run(
+        `UPDATE forges SET
+           iteration = 1,
+           phase = 'bf-plan-draft',
+           context = json_remove(COALESCE(context, '{}'), '$.integration_failure_history'),
+           blocking_reason = NULL,
+           status = 'active',
+           updated_at = datetime('now')
+         WHERE id = ?`,
+        [forgeId]
+      );
+      db.run('COMMIT');
+    } catch (e) {
+      db.run('ROLLBACK');
+      throw e;
+    }
+  });
+}
+
+// ── Re-plan on integration failure (pipeline-v3 Task 3.3) ──────────────────
+
+const REPLAN_CAP = 5;
+
+/**
+ * reEnterPlanning — called when integration gate has ≥1 failing contract.
+ *
+ * - At iteration < REPLAN_CAP: increments iteration, sets phase='bf-plan-draft',
+ *   appends {iteration, contracts, timestamp} to context.integration_failure_history.
+ *   Streams rows are NOT deleted (preserved for reference).
+ * - At iteration === REPLAN_CAP: calls blockForge with cap-exceeded reason,
+ *   does NOT increment further.
+ */
+export function reEnterPlanning(cwd, forgeId) {
+  return withDb(cwd, db => {
+    const forge = db.query("SELECT iteration, context FROM forges WHERE id = ?").get(forgeId);
+    if (!forge) throw new Error(`Forge not found: ${forgeId}`);
+
+    const iteration = forge.iteration;
+
+    if (iteration >= REPLAN_CAP) {
+      db.run(
+        `UPDATE forges SET status = 'blocked', blocking_reason = ?, updated_at = datetime('now') WHERE id = ?`,
+        [`integration-replan cap (5) exceeded`, forgeId]
+      );
+      return;
+    }
+
+    // Collect failing contracts for history
+    const failingContracts = db.query(
+      `SELECT id, contract_name, test_cmd, failure_output FROM integration_contracts WHERE forge_id = ? AND status = 'fail'`
+    ).all(forgeId);
+
+    // Build updated integration_failure_history
+    const ctx = forge.context ? JSON.parse(forge.context) : {};
+    const history = Array.isArray(ctx.integration_failure_history) ? ctx.integration_failure_history : [];
+    history.push({
+      iteration,
+      contracts: failingContracts.map(c => ({
+        contract_name: c.contract_name,
+        test_cmd: c.test_cmd,
+        failure_output: c.failure_output,
+      })),
+      timestamp: new Date().toISOString(),
+    });
+
+    const newIteration = iteration + 1;
+
+    db.run(
+      `UPDATE forges SET
+         iteration = ?,
+         phase = 'bf-plan-draft',
+         context = json_set(COALESCE(context, '{}'), '$.integration_failure_history', json(?)),
+         updated_at = datetime('now')
+       WHERE id = ?`,
+      [newIteration, JSON.stringify(history), forgeId]
+    );
+  });
+}
+
+/**
+ * dispatchIntegrationResult — branching helper testable by unit tests.
+ *
+ * allPass=true  → calls completeForge (integration succeeded)
+ * allPass=false → calls reEnterPlanning (integration failed, re-plan)
+ */
+export function dispatchIntegrationResult(cwd, forgeId, { allPass, lesson = null }) {
+  if (allPass) {
+    completeForge(cwd, forgeId, lesson);
+  } else {
+    reEnterPlanning(cwd, forgeId);
+  }
 }
 
 // ── Co-failure aggregation ──────────────────────────────
