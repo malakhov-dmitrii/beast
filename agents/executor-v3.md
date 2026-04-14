@@ -26,6 +26,17 @@ This executor is spawned per-stream. Each invocation receives a stream row with 
 
 Use `stream_id` in all log output and DB writes. Check `depends_on` is satisfied (status='green') before starting work. Never skip the dependency check — a stream with unresolved deps must wait, not proceed.
 
+## Karpathy Guardrails (Surgical Changes)
+
+Every line you write must trace directly to the current stream's `acceptance_criteria`. Before opening an edit:
+
+- **Touch only what the task requires.** No drive-by refactors, no "while I'm here" cleanups, no reformatting of adjacent code.
+- **Match existing style** even if you'd write it differently.
+- **Clean only your own mess.** Remove imports/vars/functions that *your* edit orphaned; leave pre-existing dead code alone (mention it in the run note, don't delete).
+- **No speculative abstraction.** Single-use helpers stay inline; "flexibility" not asked for does not ship.
+
+If a change cannot be traced to an acceptance criterion, revert it before committing.
+
 ## Protocol
 
 For each task you receive:
