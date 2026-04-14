@@ -632,3 +632,82 @@ function updateCoFailures(db, forgeId) {
     }
   }
 }
+
+// ── Operator override audit (ADR §9 Q3, resolved 2026-04-14) ──────────────
+// Setting tdd_required_disabled or pipelineV3=false is a deliberate override
+// that bypasses the forge's safety discipline. Require a reason and record a
+// strategic claim for audit so operators can't quietly erode enforcement.
+
+export function disableTdd(cwd, forgeId, reason) {
+  if (typeof reason !== "string" || reason.trim().length < 3) {
+    throw new Error(
+      "disableTdd requires a reason (≥3 chars) — this is an audited override. " +
+      "Pass a sentence explaining why TDD enforcement is being skipped for this forge.",
+    );
+  }
+  return withDb(cwd, (db) => {
+    const row = db.query("SELECT iteration FROM forges WHERE id = ?").get(forgeId);
+    if (!row) throw new Error(`disableTdd: forge ${forgeId} not found`);
+    db.run(
+      `UPDATE forges SET context = json_set(COALESCE(context,'{}'),
+        '$.tdd_required_disabled', json('true')), updated_at = datetime('now') WHERE id = ?`,
+      [forgeId],
+    );
+    const result = db.run(
+      `INSERT INTO claim_validations (forge_id, iteration, step_number, claim_type, claim_text, citation, validation_result, validation_notes)
+       VALUES (?, ?, 0, 'strategic', ?, 'operator-override', 'verified', ?)`,
+      [forgeId, row.iteration, `TDD enforcement disabled: ${reason.trim()}`, reason.trim()],
+    );
+    return Number(result.lastInsertRowid);
+  });
+}
+
+export function enableTdd(cwd, forgeId) {
+  return withDb(cwd, (db) => {
+    db.run(
+      `UPDATE forges SET context = json_remove(COALESCE(context,'{}'),
+        '$.tdd_required_disabled'), updated_at = datetime('now') WHERE id = ?`,
+      [forgeId],
+    );
+  });
+}
+
+// ── Cross-forge stream sharing (ADR §9 Q2, detect-only 2026-04-14) ────────
+// Detects streams across forges that are structurally identical — same sorted
+// touches_files + same verifier_cmd — so an operator can spot duplicate work.
+// Detection only; execution sharing is deferred (each forge still runs its
+// own stream independently, preserving audit/isolation).
+
+export function detectSharedStreams(cwd) {
+  return withDb(cwd, (db) => {
+    const rows = db.query(
+      `SELECT id, forge_id, stream_id, touches_files, verifier_cmd FROM streams`,
+    ).all();
+    const buckets = new Map();
+    for (const row of rows) {
+      const files = JSON.parse(row.touches_files || "[]").slice().sort();
+      if (files.length === 0) continue;
+      const key = JSON.stringify([files, row.verifier_cmd]);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push({
+        rowId: row.id,
+        forgeId: row.forge_id,
+        streamId: row.stream_id,
+        touchesFiles: files,
+        verifierCmd: row.verifier_cmd,
+      });
+    }
+    const dupes = [];
+    for (const group of buckets.values()) {
+      if (group.length < 2) continue;
+      const forgeIds = new Set(group.map((s) => s.forgeId));
+      if (forgeIds.size < 2) continue; // same forge twice = intra-forge, not cross
+      dupes.push({
+        touchesFiles: group[0].touchesFiles,
+        verifierCmd: group[0].verifierCmd,
+        occurrences: group,
+      });
+    }
+    return dupes;
+  });
+}
