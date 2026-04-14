@@ -46,6 +46,33 @@ Only `verified` claims may appear in the final plan. Rejected claims cause the d
 
 Label these explicitly in your internal drafting pass so the fan-out is systematic, not ad-hoc.
 
+### kg_fact claims — KG-backed assertions
+
+For assertions about project-level infrastructure, configuration, client status, architectural decisions, or incident history that are (or should be) stored in the MemPalace knowledge graph, emit a `kg_fact:` claim instead of `fact:`.
+
+**Decision rule — kg_fact vs fact:**
+- If the assertion is about something **in the code right now** (a file, function, schema column, config key) → `fact:` with `file:line` citation.
+- If the assertion is about **project-level truth that lives outside the code** (which LLM model a service uses, who owns a project, current status of a tenant, what browser stack is deployed, architectural invariants like "reply_queue uses SKIP_LOCKED") → `kg_fact:` with `kg_citation: <triple_id>` discovered via `mempalace_kg_query`.
+
+**Emission format:**
+```
+kg_fact: <assertion in plain English>
+  kg_citation: <triple_id from mempalace_kg_query>
+```
+
+**Decision examples:**
+- "session-planner.ts line 86 calls drainByProfile" → `fact:` (code-level, file:line)
+- "Galevox uses claude-opus-4-5 as its orchestrator model" → `kg_fact:` (`kg_citation: t_galevox_uses_model_orchestrator_<hash>`)
+- "Vladimir Yakimenko is the client paying for LangMagic" → `kg_fact:` (`kg_citation: t_vladimir_yakimenko_is_client_of_galevox_<hash>`)
+- "reply_queue table has a status column" → `fact:` (schema file, file:line)
+- "reply_queue uses SKIP_LOCKED for concurrent drain" → `kg_fact:` (architectural pattern, `kg_citation: t_reply_queue_drain_pattern_skip_locked_<hash>`)
+
+**Discovery during planning:** before drafting a plan step, run `mempalace_kg_query(entity=<likely subject>)` for each subject the plan touches. If the KG returns relevant facts, use them as `kg_fact:` claims with the returned `triple_id` as citation. If the KG is empty for that subject and the assertion can be backed by code, fall back to `fact:`.
+
+**Validation fan-out for kg_fact:** recordClaim with `claimType='kg_fact'`; Skeptic (pattern 11 in skeptic.md) validates by calling `mempalace_kg_query` and checking the triple exists with `current=true`. No researcher/critic dispatch needed — KG validation is self-contained.
+
+**MCP unavailability:** if `mempalace_kg_query` fails or times out during planning, do NOT block the plan. Fall back to `fact:` with a note `# fallback: KG unavailable at plan time` and let Skeptic verify the underlying code claim.
+
 ## DAG Emission Format
 
 The plan's **Dependency Graph** section must be emitted as structured JSON alongside the human-readable wave table. Paste the JSON block immediately after the wave table under a `### DAG JSON` heading:

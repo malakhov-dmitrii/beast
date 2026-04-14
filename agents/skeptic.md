@@ -53,6 +53,10 @@ Plan proposes tests using a framework, pattern, or assertion style not used in t
 Plan ignores race conditions, parallel execution issues, or state conflicts.
 **Verify:** Check if any tasks modify shared state. Review dependency graph for conflicts.
 
+### 11. KG Citation Hallucination
+Plan contains a `kg_fact:` claim whose `kg_citation` does not match any triple stored in MemPalace, or whose triple has `current=false`.
+**Verify:** MCP tools are NOT available to you as a subagent. The orchestrator (parent session) MUST pre-fetch `mempalace_kg_query(entity=<subject>)` for each subject in the plan and include the JSON result in your sealed input bundle as a `### KG Snapshot` section. For each `kg_fact:` claim, find the subject's fact list in the snapshot and verify the declared `kg_citation` (matched by `predicate` + `object` + `current=true`) is present. If the snapshot lacks the claimed triple, or `current=false`, flag as MIRAGE. If the KG Snapshot is missing or empty for the subject, mark the claim `unverifiable` and surface a P2 finding — do not fail the plan.
+
 ## Scoring Rubric
 
 Score each criterion 1-5:
@@ -72,11 +76,12 @@ Score each criterion 1-5:
 For EACH claim in the plan:
 
 1. **Identify the claim** — What is being asserted?
-2. **Classify the claim** — Is it a codebase claim, external claim, or logic claim?
+2. **Classify the claim** — Is it a codebase claim, external claim, logic claim, or KG claim?
 3. **Verify the claim:**
-   - Codebase claim → Read the actual file, Grep for the pattern
+   - Codebase claim (`fact:`) → Read the actual file, Grep for the pattern
    - External claim → WebSearch/WebFetch the official docs
    - Logic claim → Trace the logic step by step
+   - KG claim (`kg_fact:`) → Call `mempalace_kg_query(entity=<subject>)`, verify declared `triple_id` exists with `current=true` (see Pattern 11 above)
 4. **Tag the result:** VERIFIED, UNVERIFIED, or MIRAGE
 5. **If MIRAGE:** Explain what's actually true and what the plan should say instead
 

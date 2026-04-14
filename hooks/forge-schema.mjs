@@ -16,7 +16,7 @@ import { execSync } from "node:child_process";
  * Schema version. Bump this when adding tables/columns/triggers.
  * Migration functions handle upgrading from any previous version.
  */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 /** Resolve project .omc/ directory (git worktree aware) */
 export function resolveOmcRoot(cwd) {
@@ -64,6 +64,10 @@ function migrateIfNeeded(db) {
 
   if (currentVersion < 4) {
     migrateV3toV4(db);
+  }
+
+  if (currentVersion < 5) {
+    migrateV4toV5(db);
   }
 
   db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
@@ -255,6 +259,60 @@ function migrateV2toV3(db) {
 function migrateV3toV4(db) {
   // Add red_tests column to streams for verifier superset enforcement (Task 3.1)
   try { db.run("ALTER TABLE streams ADD COLUMN red_tests TEXT DEFAULT '[]'"); } catch {}
+}
+
+function migrateV4toV5(db) {
+  // V4→V5: extend claim_validations CHECK to include 'kg_fact', add palace_drafts table.
+  // SQLite has no ALTER CHECK — must recreate the table. Explicit column list prevents
+  // silent drops if schemas diverge.
+  db.run("BEGIN IMMEDIATE");
+  try {
+    const preCount = db.query("SELECT COUNT(*) as c FROM claim_validations").get().c;
+
+    db.run(`CREATE TABLE claim_validations_new (
+      id INTEGER PRIMARY KEY,
+      forge_id INTEGER NOT NULL REFERENCES forges(id),
+      iteration INTEGER NOT NULL,
+      step_number INTEGER NOT NULL,
+      claim_type TEXT NOT NULL CHECK(claim_type IN ('fact','design_bet','strategic','kg_fact')),
+      claim_text TEXT NOT NULL,
+      citation TEXT,
+      validation_result TEXT CHECK(validation_result IN ('verified','mirage','unverifiable','pending')),
+      validation_notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
+
+    db.run(`INSERT INTO claim_validations_new
+      (id, forge_id, iteration, step_number, claim_type, claim_text, citation, validation_result, validation_notes, created_at)
+      SELECT id, forge_id, iteration, step_number, claim_type, claim_text, citation, validation_result, validation_notes, created_at
+      FROM claim_validations`);
+
+    const postCount = db.query("SELECT COUNT(*) as c FROM claim_validations_new").get().c;
+    if (postCount !== preCount) {
+      throw new Error(`V4→V5 migration row count mismatch: pre=${preCount} post=${postCount}`);
+    }
+
+    db.run("DROP TABLE claim_validations");
+    db.run("ALTER TABLE claim_validations_new RENAME TO claim_validations");
+    db.run("CREATE INDEX IF NOT EXISTS idx_claims_forge_iter ON claim_validations(forge_id, iteration)");
+
+    db.run(`CREATE TABLE IF NOT EXISTS palace_drafts (
+      id INTEGER PRIMARY KEY,
+      forge_id INTEGER NOT NULL REFERENCES forges(id),
+      draft_type TEXT NOT NULL CHECK(draft_type IN ('kg_add','add_drawer','kg_invalidate')),
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending','committed','discarded')) DEFAULT 'pending',
+      source_spike_id INTEGER REFERENCES spikes(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      committed_at TEXT
+    )`);
+    db.run("CREATE INDEX IF NOT EXISTS idx_palace_drafts_forge_status ON palace_drafts(forge_id, status)");
+
+    db.run("COMMIT");
+  } catch (e) {
+    db.run("ROLLBACK");
+    throw e;
+  }
 }
 
 function migrateV1toV2(db) {

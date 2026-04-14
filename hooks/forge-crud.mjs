@@ -266,7 +266,7 @@ export function getClaimSummary(cwd, forgeId, iteration) {
        GROUP BY claim_type, validation_result`
     ).all(forgeId, iteration);
 
-    const summary = { fact: {}, design_bet: {}, strategic: {} };
+    const summary = { fact: {}, design_bet: {}, strategic: {}, kg_fact: {} };
     for (const row of rows) {
       const type = row.claim_type;
       const result = row.validation_result || 'pending';
@@ -274,6 +274,50 @@ export function getClaimSummary(cwd, forgeId, iteration) {
     }
     return summary;
   } finally { db.close(); }
+}
+
+// ── Palace drafts (MemPalace integration — Machine 3 approval pattern) ──
+// JS params are camelCase; DB columns are snake_case. payload is a JS object
+// serialized to payload_json via JSON.stringify on write, JSON.parse on read.
+
+export function addPalaceDraft(cwd, forgeId, { draftType, payload, sourceSpikeId = null }) {
+  return withDb(cwd, db => {
+    const result = db.run(
+      `INSERT INTO palace_drafts (forge_id, draft_type, payload_json, source_spike_id)
+       VALUES (?, ?, ?, ?)`,
+      [forgeId, draftType, JSON.stringify(payload), sourceSpikeId]
+    );
+    return Number(result.lastInsertRowid);
+  });
+}
+
+export function listPalaceDrafts(cwd, forgeId, status = null) {
+  return withDb(cwd, db => {
+    const rows = status
+      ? db.query(`SELECT * FROM palace_drafts WHERE forge_id = ? AND status = ? ORDER BY id`).all(forgeId, status)
+      : db.query(`SELECT * FROM palace_drafts WHERE forge_id = ? ORDER BY id`).all(forgeId);
+    return rows.map(row => ({ ...row, payload: JSON.parse(row.payload_json) }));
+  });
+}
+
+export function markPalaceDraftCommitted(cwd, draftId) {
+  withDb(cwd, db => {
+    db.run(
+      `UPDATE palace_drafts SET status = 'committed', committed_at = datetime('now')
+       WHERE id = ? AND status = 'pending'`,
+      [draftId]
+    );
+  });
+}
+
+export function discardPalaceDraft(cwd, draftId) {
+  withDb(cwd, db => {
+    db.run(
+      `UPDATE palace_drafts SET status = 'discarded'
+       WHERE id = ? AND status = 'pending'`,
+      [draftId]
+    );
+  });
 }
 
 // ── Queries for PRECEDENT ───────────────────────────────

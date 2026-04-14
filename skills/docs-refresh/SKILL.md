@@ -111,6 +111,46 @@ After execution:
 - CLAUDE.md gotcha count still under 40 lines
 - `git diff --stat` — review what changed
 
+### 6. MEMPALACE SYNC
+
+Skip entirely if `--skip-mempalace` flag is set or if `mempalace_status` MCP tool is unavailable.
+
+**6.1 Re-mine project** — push updated docs into palace.
+
+```
+mempalace mine <project-root>
+```
+
+Incremental: mempalace compares `source_mtime` per file and skips unchanged. Only updated/added memory files, CLAUDE.md, and docs/ get re-chunked. Cheap even on large repos.
+
+Do NOT re-mine the convos wing (`~/.claude/projects/...` with `--mode convos`) — conversation history is append-only and handled separately.
+
+**6.2 KG invalidate for deleted files** — for each file removed in Phase 4:
+
+1. Extract entity name from filename slug (`client-vladimir-yakimenko.md` → `Vladimir Yakimenko`, `arch-reply-queue.md` → `reply-queue`).
+2. `mempalace_kg_query(entity=...)` — list facts currently stored.
+3. For facts whose `source_file` matches the deleted file → `mempalace_kg_invalidate(fact_id=...)`.
+4. If unsure about a fact's provenance, SKIP — never invalidate a fact you can't trace to the deleted file.
+
+**6.3 KG add for updates** — for facts that CHANGED during Phase 4 (e.g. client pricing updated, project status flipped):
+
+1. `mempalace_kg_invalidate` on the old fact (if it exists in KG).
+2. `mempalace_kg_add` with the new fact, including `source_file` pointing to the updated memory file.
+
+Only add facts you are confident about. Facts derived from speculation or uncommitted plans should NOT enter the KG.
+
+**6.4 Diary write** — record the refresh pass:
+
+```
+mempalace_diary_write(
+  agent_name="claude-code",
+  topic="docs-refresh",
+  entry="REFRESH:<date>|deleted:N|updated:M|compressed:K|kg_invalidated:X|kg_added:Y|memory.lines:A→B"
+)
+```
+
+Keep AAAK-compressed — one line. Omit details that are already in git history.
+
 ---
 
 ## Staleness Heuristics
@@ -145,10 +185,12 @@ When merging:
 ## Flags
 
 ```
-/docs-refresh                — full pipeline: inventory → scan → triage → (approve) → execute → verify
-/docs-refresh --scan-only    — inventory + scan + triage report, no changes
-/docs-refresh --memory-only  — scope to memory files + MEMORY.md only
-/docs-refresh --claude-only  — scope to CLAUDE.md files only
-/docs-refresh --docs-only    — scope to docs/ vault only
-/docs-refresh --auto         — auto-approve obvious deletions (deleted systems, duplicates), ask for ambiguous
+/docs-refresh                  — full pipeline: inventory → scan → triage → (approve) → execute → verify → mempalace-sync
+/docs-refresh --scan-only      — inventory + scan + triage report, no changes
+/docs-refresh --memory-only    — scope to memory files + MEMORY.md only
+/docs-refresh --claude-only    — scope to CLAUDE.md files only
+/docs-refresh --docs-only      — scope to docs/ vault only
+/docs-refresh --auto           — auto-approve obvious deletions (deleted systems, duplicates), ask for ambiguous
+/docs-refresh --skip-mempalace — skip Phase 6 (no re-mine, no KG sync, no diary write)
+/docs-refresh --mempalace-only — run Phase 6 only (re-mine + KG sync + diary), no staleness scan
 ```

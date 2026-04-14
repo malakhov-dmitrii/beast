@@ -109,12 +109,19 @@ For the statusline `max_iterations`: use forge iteration cap (default 5) during 
 ```
 state_write(mode: "ralph", active: false, completed_at: <ISO>)
 notepad_write_priority(content: "[FORGE] DONE ✓ | <slug> | <total_time>")
+mempalace_diary_write(
+  agent_name: "claude-code",
+  topic: "forge-<slug>",
+  entry: "FORGE:<slug>|iters:N|gates:PASS|spikes:M|drawers:K|lesson:<AAAK summary>"
+)
 ```
 
 On failure:
 ```
 notepad_write_priority(content: "[FORGE] BLOCKED | <slug> | <reason>")
 ```
+
+**Non-blocking diary guarantee (D):** `mempalace_diary_write` failure (timeout, MCP error, palace unavailable) MUST NOT block forge completion. Per the A runtime degradation contract: catch the failure, log `[palace-degraded] diary_write failed: <reason>` to notepad, mark forge completed in `forge.db` regardless. Forge completion is the source of truth; the diary entry is a secondary write.
 
 ---
 
@@ -160,6 +167,11 @@ Before touching code, search what the project already knows:
    ```
    Surface: "reply-worker + engage-scheduler fail Integration 60% — include both in scope?"
 6. For large codebase scans, prefer `ctx_batch_execute` to keep research results in sandbox.
+7. **MemPalace palace + KG recall** (A). In the same message, spawn a parallel fan-out:
+   - `mempalace_search(query="<touched-systems keywords>", wing="<project slug>", limit=5)` — semantic recall across code + docs + convos
+   - `mempalace_kg_query(entity="<system>")` — one call per touched system for typed facts (deps, status, models, incidents)
+   - `mempalace_diary_read(agent_name="claude-code", last_n=3)` — recent agent diary entries for cross-session context
+   Summarize results into a `## Prior institutional context` section that is prepended to PLAN-DRAFT. **Runtime degradation contract:** each palace call has a 10s soft timeout. On timeout, error, or MCP-unavailable, log one line via `notepad_write_priority` prefixed `[palace-degraded] <call> failed: <reason>`, skip the failing call, and continue PRECEDENT with file-based sources only. NEVER block or retry-loop on a palace call — forge must remain forward-progressable when MCP is flaky. The same contract applies to every palace call mentioned elsewhere in this skill (Skeptic kg_query, draft commits, completion diary_write, spike mirror). If the `--no-mempalace` flag is set, skip steps 7 entirely.
 
 ### RESEARCH — verify everything, assume nothing
 
@@ -227,12 +239,19 @@ Each step MUST contain a `Claims:` block classifying every assertion:
 **strategic:** — direction-level choice
   Required: `rationale:` + `alternatives_considered:`
 
+**kg_fact:** — assertion about project-level truth stored in the MemPalace knowledge graph
+  Required: `kg_citation: <triple_id>` discovered via `mempalace_kg_query`.
+  Use `kg_fact:` (not `fact:`) when the assertion is about project-level infrastructure/config/client status/architectural invariants that live outside the code — models a service uses, who owns a project, current tenant status, browser stack, patterns like "reply_queue uses SKIP_LOCKED". Use `fact:` for code-level claims with `file:line` citations. See `agents/planner-v3.md` "### kg_fact claims" for the full decision rule and examples.
+
 NO global "% hard evidence" gate. Skeptic checks PER CLAIM:
 - fact: missing citation → mirage
 - fact: citation broken (file/line absent) → mirage
 - design_bet: missing validation_plan → mirage
 - strategic: missing alternatives_considered → mirage
+- kg_fact: triple_id not in KG, or triple `current=false` → mirage (see skeptic.md pattern 11)
 Plan with ANY mirage → FAIL Skeptic gate.
+
+**Refuted kg_fact feedback loop:** when Skeptic verdicts a `kg_fact:` claim as MIRAGE, the orchestrator enqueues a `palace_drafts` row with `draft_type='kg_invalidate', payload:{triple_id}` so the stale KG fact can be cleaned up in Machine 3. Subject to the A runtime degradation contract (skip enqueue if MCP flaky).
 
 Each step also gets `complexity: simple|complex`:
 - Author sets initial value
@@ -339,7 +358,8 @@ Gates do NOT read `.omc/forge.db`. They do NOT look for other gate findings. Iso
 - Verify every `fact:` claim citation (file exists, line contains claimed thing)
 - Verify every `design_bet:` has assumption + validation_plan + blast_radius
 - Verify every `strategic:` has rationale + alternatives_considered
-- Hunt for mirages (phantom files, APIs, functions)
+- Verify every `kg_fact:` against the `### KG Snapshot` section included in the sealed input bundle (orchestrator pre-fetches `mempalace_kg_query(entity=<subject>)` for each plan subject BEFORE spawning Skeptic, then includes the JSON snapshot in Skeptic's prompt). Skeptic matches `kg_citation` by `(predicate, object, current=true)` against the snapshot. MCP tools are NOT reachable from subagent frontmatter — inline-snapshot is the only reliable path. (Pattern 11 in agents/skeptic.md)
+- Hunt for mirages (phantom files, APIs, functions, stale triples)
 - PASS = zero mirages, all claims structurally valid
 
 **Integration** (blind, sonnet, fresh):
@@ -493,6 +513,9 @@ Machine 3 doesn't just audit — it GENERATES docs from forge results:
 2. **Gate finding repeated 3+ times → CLAUDE.md gotcha.** Query forge.db: `SELECT findings FROM gates WHERE result='FAIL' GROUP BY findings HAVING COUNT(*) >= 3`. If a finding repeats across forges, add it to CLAUDE.md gotchas section.
 3. **Architecture changed → update/create docs.** If the forge modified architecture files (new tables, new services, new data flow), update `docs/architecture/{system}.md` or create if missing.
 4. **Forge lesson → memory file.** On `--complete`, if a lesson was recorded, check if it's already in memory. If not, auto-create `lesson-{slug}.md`.
+5. **Palace drafts — MemPalace write-through (C).** All palace writes accumulated during the forge run (lessons as drawers, permanent spikes as `kg_add`, architecture changes as drawers, refuted kg_fact as `kg_invalidate`) live in the `palace_drafts` table via `addPalaceDraft`. At this stage, call `listPalaceDrafts(cwd, forgeId, 'pending')` and present a single **batch triage** to the user: group by `draft_type`, show count + preview of each payload, ask `approve all | reject all | edit`. On approve, iterate drafts: call the matching MCP tool (`mempalace_kg_add` / `mempalace_add_drawer` / `mempalace_kg_invalidate`) per payload; on success call `markPalaceDraftCommitted(cwd, draftId)`. On reject, call `discardPalaceDraft(cwd, draftId)` for each. Partial MCP failure leaves remaining rows `pending` — user can re-run Machine 3 to retry. All MCP calls subject to the A runtime degradation contract.
+
+**Resume-surface contract:** `/forge --resume <slug>` MUST run `listPalaceDrafts(cwd, forgeId, 'pending')` and surface the count to the user BEFORE continuing work on the resumed forge. If count > 0, prompt: "N pending palace drafts from last run — triage now? (y/N)". On `y` → run the batch-triage flow above; on `N` → note `[palace-drafts-deferred] N rows` to notepad and continue resume. Without this, drafts accumulate silently across park/resume cycles.
 
 ### Rules
 
@@ -534,6 +557,8 @@ These rules prevent the self-optimizing system from removing its own safety chec
 8. **Opus review pass on gemini-executed steps is MANDATORY.**
    Gemini NEVER self-approves. Token savings do not override safety.
 
+**Note on MemPalace integration (2026-04-14):** All palace recall, `kg_fact:` validation, `palace_drafts` write-through, completion diary, and spike mirror are fully additive. Rule #7 is preserved because `kg_fact:` has structural parity with `fact:` — `kg_citation: <triple_id>` is a required citation just like `file:line`, and Skeptic validates triple existence + `current=true` via `mempalace_kg_query`. Rule #5 is preserved because Skeptic reads KG as an additional data source, not as another gate's findings. All palace interactions honor the runtime degradation contract (A) and are disabled wholesale by `--no-mempalace`.
+
 ---
 
 ## Forge Commands
@@ -556,6 +581,7 @@ Forge manages persistent work units ("forges") that survive across sessions.
 /forge --execute           — load existing FINAL-PLAN, skip forge
 /forge --no-docs           — skip docs-refresh final stage
 /forge --no-visionary "task"  — skip visionary stream (equivalent to 'skip' in CLARIFY)
+/forge --no-mempalace      — skip all MemPalace integration (palace recall in PRECEDENT, kg_fact validation, palace_drafts write-through, completion diary, spike mirror). Use when palace MCP is unavailable or for hermetic runs.
 ```
 
 ### Forge persistence
@@ -588,6 +614,11 @@ After each spike:
 INSERT INTO spikes (forge_id, assumption, result, actual, permanent)
 VALUES (<id>, 'Dolphin supports concurrent tabs', 'refuted', '1 tab per profile', 1);
 ```
+
+**Spike mirror to palace (E).** After recording a spike with `permanent=1`, mirror it into `palace_drafts` so Machine 3 can surface it for approval alongside other palace writes:
+- `result='confirmed'` → `addPalaceDraft(cwd, forgeId, { draftType: 'kg_add', payload: { subject, predicate, object: actual }, sourceSpikeId: <spike.id> })`
+- `result='refuted'` → `addPalaceDraft(cwd, forgeId, { draftType: 'add_drawer', payload: { wing: '<project>', room: 'documentation', content: 'Refuted: <assumption>. Actual: <actual>.' }, sourceSpikeId: <spike.id> })`
+Drafts are reviewed and committed in Machine 3 (item 5 in Auto-create). Subject to the A runtime degradation contract (skip enqueue if palace_drafts write fails — spike still recorded in forge.db).
 
 ### Spawn workflow
 
