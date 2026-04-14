@@ -202,15 +202,16 @@ Visionary stream — search for a "significantly better" approach?
 
 Save choice to `forges.context` as `visionary_mode`. If `--no-visionary` flag, auto-select `a`.
 
-### Planner agent selection (v3, flag-gated)
-Before invoking the planner agent, select it inline from the forge's flag:
+### Planner agent selection (v3 is default)
+Before invoking the planner agent, select it inline from the forge's flag.
+v3 is now the default — only explicit `pipelineV3 === false` opts back to v2:
 ```js
   const ctx = getForgeContext(cwd, forgeId);
-  Agent(subagent_type=(ctx?.pipelineV3 === true ? 'planner-v3' : 'planner'), ...)
+  Agent(subagent_type=(ctx?.pipelineV3 === false ? 'planner' : 'planner-v3'), ...)
 ```
 
 planner-v3 emits DAG JSON + parallel claim fan-out per ADR §3.
-planner remains default for v2 forges.
+planner is the explicit opt-out path (`setForgeContext(forgeId, 'pipelineV3', false)`).
 
 ### PLAN — write the plan draft with typed claims
 
@@ -368,14 +369,14 @@ FINAL-PLAN saved to `.omc/plans/FINAL-PLAN-{slug}.md` (or project root if .omc d
 
 ## Execute (cascade, ralph persistence, TDD)
 
-### Stream Cascade (v3, flag-gated)
-Before cascade, check feature flag:
+### Stream Cascade (v3 is default)
+v3 is the default execute path. Only explicit `pipelineV3 === false` opts back to the v2 linear cascade:
 ```js
   const ctx = getForgeContext(cwd, forgeId);
-  if (ctx?.pipelineV3 === true) {
-    await fanOutStreams(cwd, forgeId, /* task spawner */);
+  if (ctx?.pipelineV3 === false) {
+    // v2 linear cascade (legacy opt-out path)
   } else {
-    // v2 linear cascade (existing behavior)
+    await fanOutStreams(cwd, forgeId, /* task spawner */);
   }
 ```
 

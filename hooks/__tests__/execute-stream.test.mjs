@@ -201,10 +201,11 @@ test("fanOutStreams waits for dependency to complete before starting dependent s
   expect(completionOrder.indexOf("dep-a")).toBeLessThan(completionOrder.indexOf("dep-b"));
 });
 
-// ── Test 7: fanOutStreams flag-off → v2-fallback ──────────────────────────
+// ── Test 7: fanOutStreams explicit opt-out → v2-fallback ──────────────────
 
-test("fanOutStreams returns {mode:'v2-fallback'} when pipelineV3 flag is not set", async () => {
-  // Do NOT set pipelineV3 flag — forge context is empty by default
+test("fanOutStreams returns {mode:'v2-fallback'} when pipelineV3 === false (explicit opt-out)", async () => {
+  // v3 is now the default — only explicit `false` opts back to v2.
+  setForgeContext(cwd, forgeId, "pipelineV3", false);
 
   createStream(cwd, forgeId, {
     streamId: "fallback-s1",
@@ -219,6 +220,27 @@ test("fanOutStreams returns {mode:'v2-fallback'} when pipelineV3 flag is not set
   const result = await fanOutStreams(cwd, forgeId, mockTaskFn);
 
   expect(result).toEqual({ mode: "v2-fallback" });
+});
+
+// ── Test 7b: fanOutStreams default (no flag) → v3-complete ────────────────
+
+test("fanOutStreams returns {mode:'v3-complete'} when pipelineV3 flag is not set (v3 is the default)", async () => {
+  // Do NOT set pipelineV3 flag — forge context is empty by default
+  // After the v3-default flip, an unset flag means v3.
+
+  createStream(cwd, forgeId, {
+    streamId: "default-s1",
+    verifierCmd: "true",
+    touchesFiles: [],
+    acceptanceCriteria: [],
+    dependsOn: [],
+  });
+
+  const mockTaskFn = async () => ({ green_tests: ["pass"] });
+
+  const result = await fanOutStreams(cwd, forgeId, mockTaskFn);
+
+  expect(result).toEqual({ mode: "v3-complete" });
 });
 
 // ── Test 8: fanOutStreams flag-on → parallel Task() path ─────────────────
@@ -255,8 +277,8 @@ test("SKILL.md contains inline-ternary planner agent selection pattern in PLAN-D
 
   const content = readFileSync(skillPath, "utf8");
 
-  // Must contain the inline ternary pattern from the plan spec
-  expect(content).toContain("ctx?.pipelineV3 === true ? 'planner-v3' : 'planner'");
+  // Must contain the inline ternary pattern (v3-default flip: explicit false opts to legacy planner)
+  expect(content).toContain("ctx?.pipelineV3 === false ? 'planner' : 'planner-v3'");
   // Must also contain the stream cascade flag-check
   expect(content).toContain("fanOutStreams");
 });

@@ -375,9 +375,9 @@ export function checkStarvation(wallClocks) {
 /**
  * Fan out all streams for a forge in topological order with a concurrency cap.
  *
- * Feature-flag gated: reads forges.context.pipelineV3.
- *   - false/missing → returns { mode: "v2-fallback" } immediately.
- *   - true → runs parallel cascade, returns { mode: "v3-complete" }.
+ * Feature-flag gated: reads forges.context.pipelineV3. v3 is now the DEFAULT.
+ *   - explicit false → returns { mode: "v2-fallback" } immediately (opt-out).
+ *   - true / missing / undefined → runs parallel cascade, returns { mode: "v3-complete" }.
  *
  * @param {string} cwd
  * @param {number} forgeId
@@ -387,7 +387,7 @@ export function checkStarvation(wallClocks) {
  */
 export async function fanOutStreams(cwd, forgeId, taskFn, { concurrencyCap = 5 } = {}) {
   const ctx = getForgeContext(cwd, forgeId);
-  if (ctx?.pipelineV3 !== true) {
+  if (ctx?.pipelineV3 === false) {
     return { mode: "v2-fallback" };
   }
 
