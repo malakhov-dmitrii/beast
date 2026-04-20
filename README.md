@@ -17,7 +17,14 @@ git clone https://github.com/malakhov-dmitrii/forge.git ~/.claude/plugins/forge
 bun run ~/.claude/plugins/forge/scripts/install.mjs
 ```
 
-The installer wires `SessionStart`/`SessionEnd`/`PreCompact` hooks into the plugin's own `hooks/hooks.json` and initializes the cross-project knowledge DB at `~/.forge/global.db`. The project-scoped `.omc/forge.db` is created lazily on your first `/forge` run in each project — nothing to set up per project.
+The installer is idempotent and does five things:
+- wires `SessionStart`/`SessionEnd`/`PreCompact` in the plugin's own `hooks/hooks.json`
+- symlinks all command files from `commands/*.md` into `~/.claude/commands/`
+- symlinks all skills from `skills/<name>/` into `~/.claude/skills/<name>/`
+- adds global `SessionStart`/`SessionEnd`/`PreCompact` entries to `~/.claude/settings.json`
+- initializes cross-project knowledge DB at `~/.forge/global.db`
+
+The project-scoped `.omc/forge.db` is created lazily on your first `/forge` run in each project — nothing to set up per project.
 
 Safe to re-run. Pass `--dry-run` to preview changes, `--no-db` to skip DB init. Reverse with `bun run ~/.claude/plugins/forge/scripts/uninstall.mjs` (data is preserved).
 

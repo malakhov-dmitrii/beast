@@ -4,7 +4,10 @@
  *
  * Idempotent setup for beast-forge:
  *   1. Register SessionStart + SessionEnd + PreCompact hooks in hooks/hooks.json
- *   2. Initialize global ~/.forge/global.db (via forge-global.mjs, needs bun)
+ *   2. Symlink every commands/*.md into ~/.claude/commands/
+ *   3. Symlink every skills/<name>/ into ~/.claude/skills/<name>
+ *   4. Merge forge hooks into ~/.claude/settings.json (global Claude config)
+ *   5. Initialize global ~/.forge/global.db (via forge-global.mjs, needs bun)
  *
  * Project-scoped .omc/forge.db is NOT created here — it's lazy per project,
  * materialized on first /forge run. Hooks skip silently when it's absent.
@@ -23,7 +26,7 @@
  * Exit 0 on success (including "already set up"), non-zero on real failure.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, symlinkSync, readdirSync, lstatSync, readlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -59,6 +62,11 @@ const vlog = (...m) => { if (VERBOSE) console.error("[verbose]", ...m); };
 let failures = 0;
 const changes = [];
 const skipped = [];
+
+function resolveLinkTarget(parentDir, target) {
+  if (typeof target !== "string" || target.length === 0) return null;
+  return resolve(parentDir, target);
+}
 
 // ── 1. hooks/hooks.json ────────────────────────────────────
 
@@ -116,7 +124,14 @@ function writeHooks() {
     return;
   }
 
-  const cfg = loadHooksJson();
+  let cfg;
+  try {
+    cfg = loadHooksJson();
+  } catch (e) {
+    failures++;
+    console.error(`ERROR: ${e.message}`);
+    return;
+  }
   let mutated = false;
   for (const [event, spec] of Object.entries(DESIRED_HOOKS)) {
     if (ensureHook(cfg, event, spec)) mutated = true;
@@ -192,12 +207,222 @@ function ensureGlobalDir() {
   changes.push(`mkdir ${d}`);
 }
 
+// ── 3. Symlink commands into ~/.claude/commands/ ───────────
+
+const CLAUDE_COMMANDS_DIR = join(homedir(), ".claude", "commands");
+const PLUGIN_COMMANDS_DIR = join(PLUGIN_ROOT, "commands");
+
+function installCommands() {
+  if (!existsSync(PLUGIN_COMMANDS_DIR)) {
+    skipped.push("commands/ dir absent in plugin");
+    return;
+  }
+  if (!existsSync(CLAUDE_COMMANDS_DIR)) {
+    if (DRY_RUN) { changes.push(`mkdir ${CLAUDE_COMMANDS_DIR}`); }
+    else mkdirSync(CLAUDE_COMMANDS_DIR, { recursive: true });
+  }
+
+  // Discover all .md command files dynamically so new commands don't require
+  // updating the installer.
+  let commandFiles;
+  try {
+    commandFiles = readdirSync(PLUGIN_COMMANDS_DIR).filter(f => f.endsWith(".md"));
+  } catch (e) {
+    failures++;
+    console.error(`ERROR: cannot read ${PLUGIN_COMMANDS_DIR}: ${e.message}`);
+    return;
+  }
+  if (commandFiles.length === 0) {
+    skipped.push("commands/ has no .md files");
+    return;
+  }
+
+  for (const file of commandFiles) {
+    const src = join(PLUGIN_COMMANDS_DIR, file);
+    const dst = join(CLAUDE_COMMANDS_DIR, file);
+
+    // Handle existing destination: already correct symlink → skip; anything
+    // else → leave alone and warn (don't clobber user's own commands).
+    let existingStat;
+    try { existingStat = lstatSync(dst); } catch { existingStat = null; }
+    if (existingStat) {
+      if (existingStat.isSymbolicLink()) {
+        let targetRaw;
+        let targetAbs;
+        try {
+          targetRaw = readlinkSync(dst);
+          targetAbs = resolveLinkTarget(CLAUDE_COMMANDS_DIR, targetRaw);
+        } catch {
+          targetRaw = null;
+          targetAbs = null;
+        }
+        if (targetAbs === src) {
+          skipped.push(`command ${file} already linked`);
+          continue;
+        }
+        skipped.push(`command ${file} exists as symlink → ${targetRaw} (not ours, left alone)`);
+        continue;
+      }
+      skipped.push(`command ${file} exists as regular file (not a forge symlink, left alone)`);
+      continue;
+    }
+
+    if (DRY_RUN) {
+      changes.push(`symlink ~/.claude/commands/${file} (dry-run)`);
+      continue;
+    }
+    symlinkSync(src, dst);
+    changes.push(`symlink ~/.claude/commands/${file} → plugin/commands/${file}`);
+  }
+}
+
+// ── 4. Symlink skills into ~/.claude/skills/ ───────────────
+
+const CLAUDE_SKILLS_DIR = join(homedir(), ".claude", "skills");
+const PLUGIN_SKILLS_DIR = join(PLUGIN_ROOT, "skills");
+
+function installSkills() {
+  if (!existsSync(PLUGIN_SKILLS_DIR)) {
+    skipped.push("skills/ dir absent in plugin");
+    return;
+  }
+  if (!existsSync(CLAUDE_SKILLS_DIR)) {
+    if (DRY_RUN) { changes.push(`mkdir ${CLAUDE_SKILLS_DIR}`); }
+    else mkdirSync(CLAUDE_SKILLS_DIR, { recursive: true });
+  }
+
+  // Discover every skill directory dynamically. A "skill" = a subdir under
+  // skills/ that contains SKILL.md.
+  let entries;
+  try {
+    entries = readdirSync(PLUGIN_SKILLS_DIR, { withFileTypes: true });
+  } catch (e) {
+    failures++;
+    console.error(`ERROR: cannot read ${PLUGIN_SKILLS_DIR}: ${e.message}`);
+    return;
+  }
+
+  const skillNames = entries
+    .filter(e => e.isDirectory())
+    .map(e => e.name)
+    .filter(name => existsSync(join(PLUGIN_SKILLS_DIR, name, "SKILL.md")));
+
+  if (skillNames.length === 0) {
+    skipped.push("skills/ has no skill dirs with SKILL.md");
+    return;
+  }
+
+  for (const name of skillNames) {
+    const src = join(PLUGIN_SKILLS_DIR, name);
+    const dst = join(CLAUDE_SKILLS_DIR, name);
+
+    // Same safety logic as installCommands: only own existing symlinks,
+    // never clobber user's own skill dirs.
+    let existingStat;
+    try { existingStat = lstatSync(dst); } catch { existingStat = null; }
+    if (existingStat) {
+      if (existingStat.isSymbolicLink()) {
+        let targetRaw;
+        let targetAbs;
+        try {
+          targetRaw = readlinkSync(dst);
+          targetAbs = resolveLinkTarget(CLAUDE_SKILLS_DIR, targetRaw);
+        } catch {
+          targetRaw = null;
+          targetAbs = null;
+        }
+        if (targetAbs === src) {
+          skipped.push(`skill ${name} already linked`);
+          continue;
+        }
+        skipped.push(`skill ${name} exists as symlink → ${targetRaw} (not ours, left alone)`);
+        continue;
+      }
+      skipped.push(`skill ${name} exists as directory (not a forge symlink, left alone)`);
+      continue;
+    }
+
+    if (DRY_RUN) {
+      changes.push(`symlink ~/.claude/skills/${name}/ (dry-run)`);
+      continue;
+    }
+    symlinkSync(src, dst);
+    changes.push(`symlink ~/.claude/skills/${name} → plugin/skills/${name}`);
+  }
+}
+
+// ── 5. Merge forge hooks into ~/.claude/settings.json ──────
+
+const CLAUDE_SETTINGS = join(homedir(), ".claude", "settings.json");
+const FORGE_HOOKS_ABS = join(PLUGIN_ROOT, "hooks", "forge-hooks.mjs");
+
+const GLOBAL_HOOK_ENTRIES = {
+  SessionStart: `bun "${FORGE_HOOKS_ABS}" sessionstart`,
+  SessionEnd:   `bun "${FORGE_HOOKS_ABS}" sessionend`,
+  PreCompact:   `bun "${FORGE_HOOKS_ABS}" precompact`,
+};
+
+function loadSettings() {
+  if (!existsSync(CLAUDE_SETTINGS)) return {};
+  try {
+    return JSON.parse(readFileSync(CLAUDE_SETTINGS, "utf-8"));
+  } catch (e) {
+    throw new Error(`Cannot parse ${CLAUDE_SETTINGS}: ${e.message}`);
+  }
+}
+
+function hasGlobalHook(eventArr, cmd) {
+  if (!Array.isArray(eventArr)) return false;
+  for (const entry of eventArr) {
+    const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
+    if (hooks.some(h => h?.type === "command" && h?.command === cmd)) return true;
+  }
+  return false;
+}
+
+function mergeGlobalHooks() {
+  if (!existsSync(FORGE_HOOKS_MJS)) {
+    skipped.push("global hooks (forge-hooks.mjs absent)");
+    return;
+  }
+
+  let settings;
+  try {
+    settings = loadSettings();
+  } catch (e) {
+    failures++;
+    console.error(`ERROR: ${e.message}`);
+    return;
+  }
+  if (!settings.hooks || typeof settings.hooks !== "object") settings.hooks = {};
+
+  let mutated = false;
+  for (const [event, cmd] of Object.entries(GLOBAL_HOOK_ENTRIES)) {
+    if (!Array.isArray(settings.hooks[event])) settings.hooks[event] = [];
+    if (hasGlobalHook(settings.hooks[event], cmd)) {
+      skipped.push(`global hook ${event} already in settings.json`);
+      continue;
+    }
+    settings.hooks[event].push({ matcher: "", hooks: [{ type: "command", command: cmd }] });
+    changes.push(`global hook ${event} → settings.json`);
+    mutated = true;
+  }
+
+  if (!mutated) return;
+  if (DRY_RUN) { vlog("dry-run — skipping write to settings.json"); return; }
+  writeFileSync(CLAUDE_SETTINGS, JSON.stringify(settings, null, 2) + "\n");
+  vlog(`wrote ${CLAUDE_SETTINGS}`);
+}
+
 // ── main ───────────────────────────────────────────────────
 
 log(`Forge installer ${DRY_RUN ? "(dry-run)" : ""}`);
 log(`Plugin root: ${PLUGIN_ROOT}`);
 
 writeHooks();
+installCommands();
+installSkills();
+mergeGlobalHooks();
 
 if (SKIP_DB) {
   skipped.push("DB init (--no-db)");
