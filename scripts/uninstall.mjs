@@ -12,13 +12,17 @@
  *   --help      this help
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, lstatSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(__dirname, "..");
 const HOOKS_JSON = join(PLUGIN_ROOT, "hooks", "hooks.json");
+
+const COMMANDS_DIR = join(homedir(), ".claude", "commands");
+const COMMAND_FILES = ["forge.md", "forge-setup.md"];
 
 const args = new Set(process.argv.slice(2));
 const DRY_RUN = args.has("--dry-run");
@@ -101,6 +105,19 @@ writeFileSync(HOOKS_JSON, JSON.stringify(cfg, null, 2) + "\n");
 
 log("Removed:");
 for (const r of removed) log(`  - ${r}`);
+
+// Remove slash-command symlinks
+for (const file of COMMAND_FILES) {
+  const dst = join(COMMANDS_DIR, file);
+  try {
+    const stat = lstatSync(dst);
+    if (stat.isSymbolicLink()) {
+      if (!DRY_RUN) unlinkSync(dst);
+      log(`  - symlink ${dst}${DRY_RUN ? " (dry-run)" : ""}`);
+    }
+  } catch { /* not present, skip */ }
+}
+
 log("");
 log("Done. Data preserved:");
 log("  • .omc/forge.db  (per project — delete manually if unwanted)");

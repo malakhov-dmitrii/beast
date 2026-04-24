@@ -23,7 +23,7 @@
  * Exit 0 on success (including "already set up"), non-zero on real failure.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, symlinkSync, unlinkSync, lstatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -34,6 +34,10 @@ const PLUGIN_ROOT = resolve(__dirname, "..");
 const HOOKS_JSON = join(PLUGIN_ROOT, "hooks", "hooks.json");
 const FORGE_HOOKS_MJS = join(PLUGIN_ROOT, "hooks", "forge-hooks.mjs");
 const FORGE_GLOBAL_MJS = join(PLUGIN_ROOT, "hooks", "forge-global.mjs");
+
+const CLAUDE_DIR = join(homedir(), ".claude");
+const COMMANDS_DIR = join(CLAUDE_DIR, "commands");
+const COMMAND_FILES = ["forge.md", "forge-setup.md"];
 
 const args = new Set(process.argv.slice(2));
 const DRY_RUN = args.has("--dry-run");
@@ -192,12 +196,63 @@ function ensureGlobalDir() {
   changes.push(`mkdir ${d}`);
 }
 
+// ── 3. Slash-command symlinks ───────────────────────────────
+
+function registerCommands() {
+  if (!existsSync(COMMANDS_DIR)) {
+    if (DRY_RUN) { changes.push(`mkdir ${COMMANDS_DIR}`); }
+    else { mkdirSync(COMMANDS_DIR, { recursive: true }); }
+  }
+
+  for (const file of COMMAND_FILES) {
+    const src = join(PLUGIN_ROOT, "commands", file);
+    const dst = join(COMMANDS_DIR, file);
+
+    if (!existsSync(src)) {
+      failures++;
+      console.error(`ERROR: ${src} missing — plugin checkout incomplete`);
+      continue;
+    }
+
+    let needsCreate = true;
+    if (existsSync(dst) || (function () { try { lstatSync(dst); return true; } catch { return false; } }())) {
+      try {
+        const stat = lstatSync(dst);
+        if (stat.isSymbolicLink()) {
+          skipped.push(`command symlink ${file} (already present)`);
+          needsCreate = false;
+        } else {
+          // Regular file in the way — leave it alone, warn.
+          failures++;
+          console.error(`ERROR: ${dst} exists as a regular file; remove it manually and re-run.`);
+          needsCreate = false;
+        }
+      } catch { /* dst removed between checks */ }
+    }
+
+    if (!needsCreate) continue;
+
+    if (DRY_RUN) {
+      changes.push(`symlink commands/${file} → ${dst}`);
+      continue;
+    }
+    try {
+      symlinkSync(src, dst);
+      changes.push(`symlink commands/${file} → ${dst}`);
+    } catch (e) {
+      failures++;
+      console.error(`ERROR: cannot symlink ${file}: ${e.message}`);
+    }
+  }
+}
+
 // ── main ───────────────────────────────────────────────────
 
 log(`Forge installer ${DRY_RUN ? "(dry-run)" : ""}`);
 log(`Plugin root: ${PLUGIN_ROOT}`);
 
 writeHooks();
+registerCommands();
 
 if (SKIP_DB) {
   skipped.push("DB init (--no-db)");
